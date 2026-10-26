@@ -206,6 +206,9 @@ jobs:
           NH: ${{ inputs.NH }}
           NM: ${{ inputs.NM }}
           MM: ${{ inputs.MM }}
+          BSU_REF: ${{ vars.BSU_REF }}
+          KSUN_REF: ${{ vars.KSUN_REF }}
+          FINA_REF: ${{ vars.FINA_REF }}
           ZSTD: ${{ inputs.ZSTD }}
           LZ4KD: ${{ inputs.LZ4KD }}
           REKERNEL: ${{ inputs.REKERNEL }}

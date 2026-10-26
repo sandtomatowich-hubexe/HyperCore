@@ -124,7 +124,10 @@ install_ksu() {
 
   URL="https://raw.githubusercontent.com/$REPO/$REF/kernel/setup.sh"
   log "Installing KernelSU from $REPO | $REF"
-  curl -LSs "$URL" | bash -s "$REF"
+  git ls-remote --exit-code "https://github.com/$REPO" "refs/heads/$REF" "refs/tags/$REF" >/dev/null \
+    || { error "$REPO has no branch/tag '$REF' (set the matching repo variable to a valid ref)"; exit 1; }
+  curl -fLSs "$URL" -o /tmp/ksu-setup.sh || { error "Could not download $URL"; exit 1; }
+  bash /tmp/ksu-setup.sh "$REF"
 }
 
 ksu_included() {

@@ -17,3 +17,5 @@ GPL-3.0 and keep the original copyright and authorship notices (including those 
 - `KERNEL_VERSION` input defaults to 6.1
 - Telegram posting is skipped when the `BOT_TOKEN` secret is not set
 - Added the GitHub Pages site (`site/`, `.github/workflows/pages.yml`)
+- `install_ksu` now checks that the branch exists and fails on download errors instead of running an error page as a script
+- BakaSU builds use its `main` branch (override with the `BSU_REF` repo variable); KernelSU-Next defaults to `dev-susfs` (`KSUN_REF`), FinaSU to `main` (`FINA_REF`)

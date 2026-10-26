@@ -215,7 +215,7 @@ fi
 set -eo pipefail
 if susfs_included && [ "$KSU" = "BSU" ]; then
   log "BakaSU included"
-  install_ksu "Baka-SU/BakaSU" "sync-susfs"
+  install_ksu "Baka-SU/BakaSU" "${BSU_REF:-main}"
 
   clone_susfs
   apply_susfs_patches
@@ -225,7 +225,7 @@ fi
 
 if [ "$KSU" = "KSUN" ]; then
   log "KernelSU-Next included"
-  install_ksu_fork "KernelSU-Next/KernelSU-Next" "${KSUN_REF:-next}"
+  install_ksu_fork "KernelSU-Next/KernelSU-Next" "${KSUN_REF:-dev-susfs}"
   add_multi_managers
 fi
 
