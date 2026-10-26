@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GKI kernel builds</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#eef1f0;--fg:#16211f;--mute:#5b6b67;--line:#cfd8d5;--acc:#0b6b5c;--row:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#101716;--fg:#e3ebe8;--mute:#8da09b;--line:#27332f;--acc:#4fd1b3;--row:#161f1d}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 "Schibsted Grotesk",system-ui,sans-serif}
+main{max-width:48rem;margin:0 auto;padding:2.5rem 1rem 3rem}
+h1{font-size:clamp(2rem,7vw,3.2rem);line-height:1;margin:0 0 .5rem;font-weight:800;letter-spacing:-.03em}
+p.sub{color:var(--mute);margin:0 0 1.5rem}
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem}
+.chips button{font:inherit;padding:.35rem .85rem;border:1px solid var(--line);background:none;color:var(--fg);border-radius:99px;cursor:pointer}
+.chips button[aria-pressed=true]{background:var(--acc);border-color:var(--acc);color:var(--bg);font-weight:600}
+button:focus-visible,a:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+article{background:var(--row);border:1px solid var(--line);border-radius:6px;padding:1rem 1.1rem;margin:1rem 0}
+article h2{font-size:1.1rem;margin:0}
+article time{color:var(--mute);font-size:.9rem}
+ul{list-style:none;margin:.6rem 0 0;padding:0}
+li{display:flex;justify-content:space-between;gap:1rem;padding:.35rem 0;border-top:1px solid var(--line)}
+li a{color:var(--acc);font-weight:600;word-break:break-word}
+li span{color:var(--mute);white-space:nowrap;font-size:.9rem}
+.msg{color:var(--mute)}
+footer{max-width:48rem;margin:0 auto;padding:0 1rem 3rem;color:var(--mute);font-size:.9rem}
+footer a{color:var(--acc)}
+</style>
+</head>
+<body>
+<main>
+  <h1>GKI kernel builds</h1>
+  <p class="sub">Pick your kernel line, then the root variant that matches your manager.</p>
+  <div class="chips" id="kline" aria-label="Kernel line"></div>
+  <div class="chips" id="root" aria-label="Root variant"></div>
+  <div id="list"><p class="msg">Loading builds…</p></div>
+</main>
+<footer>
+  Built from <a href="https://github.com/ahmed-alnassif/GKID-Kernels">GKID-Kernels</a> by Ahmed Al-Nassif (GPL-3.0),
+  with susfs4ksu, KernelSU and its forks, NTSync patches from WildKernels, Baseband Guard, NoMount and DroidSpaces.
+  Full list in CREDITS.md.
+</footer>
+<script>
+const q = new URLSearchParams(location.search);
+const slug = q.get('repo') || (location.hostname.endsWith('.github.io')
+  ? location.hostname.split('.')[0] + '/' + location.pathname.split('/')[1] : '');
+const $ = id => document.getElementById(id);
+let builds = [], kline = 'all', root = 'all';
+
+// <BRAND>-<VARIANT>-<RELEASE>-<LINUX VERSION>.zip, e.g. GKI-KernelSU+SuSFS-v26.10.25-r3-6.1.115.zip
+const ZIP = /^([^-]+)-(.+)-(v\d{2}\.\d{2}\.\d{2}(?:-r\d+)?)-(\d+\.\d+)\.\d+\.zip$/;
+function rootOf(v) {
+  if (/KernelSU-Next/.test(v)) return 'KernelSU-Next';
+  if (/FinaSU/.test(v)) return 'FinaSU';
+  if (/BakaSU/.test(v)) return 'BakaSU';
+  if (/KernelSU/.test(v)) return 'KernelSU';
+  return 'Vanilla';
+}
+function msg(t) { const p = document.createElement('p'); p.className = 'msg'; p.textContent = t; return p; }
+function chips(el, values, cur, set) {
+  el.replaceChildren(...['all', ...values].map(v => {
+    const b = document.createElement('button');
+    b.textContent = v === 'all' ? 'All' : v;
+    b.setAttribute('aria-pressed', String(v === cur));
+    b.onclick = () => { set(v); draw(); };
+    return b;
+  }));
+}
+function draw() {
+  chips($('kline'), [...new Set(builds.map(b => b.kline))].sort(), kline, v => kline = v);
+  chips($('root'), [...new Set(builds.map(b => b.root))].sort(), root, v => root = v);
+  const shown = builds.filter(b => (kline === 'all' || b.kline === kline) && (root === 'all' || b.root === root));
+  if (!shown.length) { $('list').replaceChildren(msg('No builds match. Run the Builder workflow or change the filters.')); return; }
+  const byRel = new Map();
+  shown.forEach(b => { if (!byRel.has(b.rel)) byRel.set(b.rel, { date: b.date, url: b.page, items: [] }); byRel.get(b.rel).items.push(b); });
+  $('list').replaceChildren(...[...byRel].map(([rel, r]) => {
+    const a = document.createElement('article');
+    const h = document.createElement('h2'); h.textContent = rel;
+    const t = document.createElement('time'); t.textContent = ' ' + new Date(r.date).toLocaleDateString();
+    h.append(t);
+    const ul = document.createElement('ul');
+    r.items.sort((x, y) => x.variant.localeCompare(y.variant)).forEach(b => {
+      const li = document.createElement('li');
+      const l = document.createElement('a'); l.href = b.url; l.textContent = b.variant + ' · ' + b.kline;
+      const s = document.createElement('span'); s.textContent = (b.size / 1048576).toFixed(1) + ' MB';
+      li.append(l, s); ul.append(li);
+    });
+    a.append(h, ul);
+    return a;
+  }));
+}
+async function init() {
+  if (!slug) { $('list').replaceChildren(msg('Open this page as owner.github.io/repo, or add ?repo=owner/repo')); return; }
+  try {
+    const res = await fetch(`https://api.github.com/repos/${slug}/releases?per_page=40`);
+    if (!res.ok) throw new Error(res.status);
+    for (const r of await res.json()) {
+      if (r.draft || r.tag_name === 'ci-ccache-store') continue;
+      for (const a of r.assets) {
+        const m = ZIP.exec(a.name);
+        if (!m) continue;
+        builds.push({ variant: m[2], rel: m[3], kline: m[4], root: rootOf(m[2]), date: r.published_at,
+                      url: a.browser_download_url, size: a.size, page: r.html_url });
+      }
+    }
+    draw();
+  } catch (e) {
+    $('list').replaceChildren(msg(`Couldn't load releases (${e.message}). GitHub's API may be rate limiting; try again in a few minutes.`));
+  }
+}
+init();
+</script>
+</body>
+</html>
