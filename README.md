@@ -349,3 +349,7 @@ authorship notices kept. See [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for w
 Flashing a custom kernel can bootloop or brick your device and can break features that depend on a stock kernel. Back up
 your boot image and your data first, and make sure you understand how to restore them. These builds come with no
 warranty. You flash them at your own risk.
+
+### Root implementation variants
+
+The workflow can optionally build SukiSU (`builtin` branch) with SUSFS and KowSU as a standalone root variant. KowSU is deliberately kept separate because its current integration does not support SUSFS. RKSU and MamboSU are exposed as opt-in SUSFS variants; set the repository variables `RKSU_REPO` / `MAMBOSU_REPO` to the exact `owner/repository` and, if needed, `RKSU_REF` / `MAMBOSU_REF` to the desired branch before enabling them. These two integrations require a successful full kernel build to confirm compatibility with the selected upstream revision.

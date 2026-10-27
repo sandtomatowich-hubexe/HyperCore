@@ -30,6 +30,20 @@ PATCHES_DIR="$WORKDIR/patches"
 source $WORKDIR/functions.sh
 source $WORKDIR/functions-extra.sh
 
+# Fail fast on incompatible or unconfigured root variants before cloning/building the kernel.
+if [ "${KSU:-}" = "KOWSU" ] && susfs_included; then
+  error "KowSU does not support SUSFS; select KowSU only as a standalone build."
+  exit 1
+fi
+if [ "${KSU:-}" = "RKSU" ] && [ -z "${RKSU_REPO:-}" ]; then
+  error "RKSU selected but RKSU_REPO is unset; configure it as owner/repository."
+  exit 1
+fi
+if [ "${KSU:-}" = "MAMBO" ] && [ -z "${MAMBOSU_REPO:-}" ]; then
+  error "MamboSU selected but MAMBOSU_REPO is unset; configure it as owner/repository."
+  exit 1
+fi
+
 if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
   if [ "$NH" = "true" ]; then
     KERNEL_BRANCH="GKID-NH"
@@ -75,7 +89,10 @@ cd $WORKDIR
 
 log "Setting Kernel variant"
 case "$KSU" in
-  "SKSU") VARIANT="SukiSU-Ultra" ;;
+  "SKSU") VARIANT="SukiSU" ;;
+  "KOWSU") VARIANT="KowSU" ;;
+  "RKSU") VARIANT="RKSU" ;;
+  "MAMBO") VARIANT="MamboSU" ;;
   "BSU") VARIANT="BakaSU" ;;
   "KSUN") VARIANT="KernelSU-Next" ;;
   "FINA") VARIANT="FinaSU" ;;
@@ -213,6 +230,47 @@ if [ "$NH" = "true" ] && ! kernel_version_eq "$KERNEL_VERSION" "6.1" && [ "$No_D
 fi
 
 set -eo pipefail
+if [ "$KSU" = "SKSU" ]; then
+  log "SukiSU included"
+  install_ksu "${SKSU_REPO:-SukiSU-Ultra/SukiSU-Ultra}" "${SKSU_REF:-builtin}"
+  if susfs_included; then
+    clone_susfs
+    apply_susfs_patches
+  fi
+  add_multi_managers
+fi
+
+if [ "$KSU" = "KOWSU" ]; then
+  log "KowSU included (SUSFS disabled)"
+  install_ksu "${KOWSU_REPO:-KOWX712/KernelSU}" "${KOWSU_REF:-master}"
+fi
+
+if [ "$KSU" = "RKSU" ] || [ "$KSU" = "MAMBO" ]; then
+  if [ "$KSU" = "RKSU" ]; then
+    ROOT_REPO="${RKSU_REPO:-}"
+    ROOT_REF="${RKSU_REF:-main}"
+    ROOT_LABEL="RKSU"
+  else
+    ROOT_REPO="${MAMBOSU_REPO:-}"
+    ROOT_REF="${MAMBOSU_REF:-main}"
+    ROOT_LABEL="MamboSU"
+  fi
+  [ -n "$ROOT_REPO" ] || { error "$ROOT_LABEL selected but its GitHub repository variable is empty; set the matching *_REPO repository variable"; exit 1; }
+  log "$ROOT_LABEL included from $ROOT_REPO@$ROOT_REF"
+  install_ksu "$ROOT_REPO" "$ROOT_REF"
+  if susfs_included; then
+    clone_susfs
+    ROOT_TREE="$(ksu_root_dir)"
+    if [ -f "$ROOT_TREE/kernel/extension/susfs.c" ]; then
+      log "$ROOT_LABEL ships native SUSFS support"
+    else
+      (cd "$ROOT_TREE" && require_patch "$SUSFS_PATCHES/KernelSU/10_enable_susfs_for_ksu.patch")
+    fi
+    apply_susfs_patches
+  fi
+  add_multi_managers
+fi
+
 if susfs_included && [ "$KSU" = "BSU" ]; then
   log "BakaSU included"
   install_ksu "Baka-SU/BakaSU" "${BSU_REF:-main}"
@@ -435,6 +493,10 @@ for dir in \
     /etc/skel \
     /home/packer \
     /opt/pipx; do
+    if [ "$dir" = "${LINKER_SHIM:-/tmp/clang-lto-linker}" ]; then
+        warning "Preserving active ThinLTO linker shim: $dir"
+        continue
+    fi
     if [ -e "$dir" ]; then
         SIZE=$(du -sh "$dir" 2>/dev/null | cut -f1 || echo "?")
         sudo rm -rf "$dir" 2>/dev/null || true

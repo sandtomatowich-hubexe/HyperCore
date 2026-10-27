@@ -255,18 +255,22 @@ apply_patch_file() {
 
     warning "git apply failed, trying patch with fuzz"
 
-    if ! echo "$patch_data" | patch -p1 --fuzz=3 --dry-run 2>/dev/null; then
-        warning "Skipping: patch does not apply"
-        return 1
-    fi
-
-    if echo "$patch_data" | patch -p1 --fuzz=3 2>/dev/null; then
-        success "Applied patch with fuzz"
-        return 0
-    else
+    if echo "$patch_data" | patch -p1 --fuzz=3 --batch --forward --dry-run >/dev/null 2>&1; then
+        if echo "$patch_data" | patch -p1 --fuzz=3 --batch --forward >/dev/null 2>&1; then
+            success "Applied patch with fuzz"
+            return 0
+        fi
         error "Failed to apply patch"
         return 1
     fi
+
+    if echo "$patch_data" | patch -p1 --fuzz=3 --batch -R --dry-run >/dev/null 2>&1; then
+        log "Patch already applied (reverse dry-run succeeded)"
+        return 0
+    fi
+
+    warning "Skipping: patch does not apply in either direction"
+    return 1
 }
 
 apply_kernel_patches() {
@@ -529,10 +533,15 @@ apply_susfs_patches() {
       cd $OLDPWD
     fi
 
-    if ! patch -p1 --fuzz=3 < "$SUSFS_PATCHES/50_add_susfs_in_${SUSFS_PATCH}.patch"; then
-        if [ "$KERNEL_KMI" = "android13-5.15" ]; then
-            fix_namespace_susfs_mount
-        fi
+    local susfs_patch="$SUSFS_PATCHES/50_add_susfs_in_${SUSFS_PATCH}.patch"
+    if patch -p1 --fuzz=3 --batch --forward --dry-run < "$susfs_patch" >/dev/null 2>&1; then
+        patch -p1 --fuzz=3 --batch --forward < "$susfs_patch" || { error "Failed to apply required SUSFS patch: $(basename "$susfs_patch")"; return 1; }
+        success "Applied $(basename "$susfs_patch")"
+    elif patch -p1 --fuzz=3 --batch -R --dry-run < "$susfs_patch" >/dev/null 2>&1; then
+        log "SUSFS patch already applied: $(basename "$susfs_patch")"
+    else
+        error "Required SUSFS patch does not apply cleanly: $(basename "$susfs_patch")"
+        return 1
     fi
 
     if [ "$KERNEL_VERSION" = "6.12" ]; then

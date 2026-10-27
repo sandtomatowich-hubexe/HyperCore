@@ -24,6 +24,10 @@ External pieces his pipeline uses, which this one still pulls in:
 | ReSukiSU | ReSukiSU team | Root variant (upstream of BakaSU) |
 | BakaSU | Baka-SU | Root variant |
 | FinaSU | LyraVoid | Root variant |
+| SukiSU-Ultra | SukiSU-Ultra team | Root variant; built-in SUSFS integration |
+| KowSU | KOWX712 | Standalone root variant (SUSFS not supported) |
+| RKSU | Configured upstream repository | Optional root variant; repository selected through workflow variables |
+| MamboSU | Configured upstream repository | Optional root variant; repository selected through workflow variables |
 | kernel_patches (NTSync) | WildKernels | NTSync backport |
 | Baseband-guard | vc-teahouse | Baseband Guard |
 | nomount | maxsteeel | NoMount |

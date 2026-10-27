@@ -88,6 +88,26 @@ on:
         type: boolean
         default: false
 
+      BUILD_SKSU_SUSFS:
+        description: "Build SukiSU (builtin branch) + SUSFS"
+        type: boolean
+        default: false
+
+      BUILD_KOWSU:
+        description: "Build KowSU (SUSFS is not supported by this fork)"
+        type: boolean
+        default: false
+
+      BUILD_RKSU_SUSFS:
+        description: "Build RKSU + SUSFS (configure RKSU_REPO/RKSU_REF repository variables)"
+        type: boolean
+        default: false
+
+      BUILD_MAMBO_SUSFS:
+        description: "Build MamboSU + SUSFS (configure MAMBOSU_REPO/MAMBOSU_REF repository variables)"
+        type: boolean
+        default: false
+
       MM:
         description: "Try multi-manager signatures on BakaSU / KSU-Next (falls back to the fork's own support)"
         type: boolean
@@ -155,6 +175,10 @@ jobs:
           BUILD_KSU_SUSFS: ${{ github.event.inputs.BUILD_KSU_SUSFS }}
           BUILD_KSUN_SUSFS: ${{ github.event.inputs.BUILD_KSUN_SUSFS }}
           BUILD_FINA_SUSFS: ${{ github.event.inputs.BUILD_FINA_SUSFS }}
+          BUILD_SKSU_SUSFS: ${{ github.event.inputs.BUILD_SKSU_SUSFS }}
+          BUILD_KOWSU: ${{ github.event.inputs.BUILD_KOWSU }}
+          BUILD_RKSU_SUSFS: ${{ github.event.inputs.BUILD_RKSU_SUSFS }}
+          BUILD_MAMBO_SUSFS: ${{ github.event.inputs.BUILD_MAMBO_SUSFS }}
         run: |
           python3 py/generate-matrix.py >> "$GITHUB_OUTPUT"
 
@@ -210,6 +234,14 @@ jobs:
           BSU_REF: ${{ vars.BSU_REF }}
           KSUN_REF: ${{ vars.KSUN_REF }}
           FINA_REF: ${{ vars.FINA_REF }}
+          SKSU_REPO: ${{ vars.SKSU_REPO || 'SukiSU-Ultra/SukiSU-Ultra' }}
+          SKSU_REF: ${{ vars.SKSU_REF || 'builtin' }}
+          KOWSU_REPO: ${{ vars.KOWSU_REPO || 'KOWX712/KernelSU' }}
+          KOWSU_REF: ${{ vars.KOWSU_REF || 'master' }}
+          RKSU_REPO: ${{ vars.RKSU_REPO }}
+          RKSU_REF: ${{ vars.RKSU_REF || 'main' }}
+          MAMBOSU_REPO: ${{ vars.MAMBOSU_REPO }}
+          MAMBOSU_REF: ${{ vars.MAMBOSU_REF || 'main' }}
           KSUN_REPO: ${{ vars.KSUN_REPO }}
           ZSTD: ${{ inputs.ZSTD }}
           LZ4KD: ${{ inputs.LZ4KD }}

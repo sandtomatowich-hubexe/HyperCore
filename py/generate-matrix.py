@@ -46,6 +46,21 @@ BUILD_CONFIGS: Dict[str, List[Dict[str, Any]]] = {
 	"BUILD_FINA_SUSFS": [
 		config(name="FINA+SUSFS", KSU="FINA", KSU_SUSFS="true"),
 		config(name="Compat+FINA+SUSFS", KSU="FINA", KSU_COMPAT="true", KSU_SUSFS="true")
+	],
+	"BUILD_SKSU_SUSFS": [
+		config(name="SukiSU+SUSFS", KSU="SKSU", KSU_SUSFS="true"),
+		config(name="Compat+SukiSU+SUSFS", KSU="SKSU", KSU_COMPAT="true", KSU_SUSFS="true")
+	],
+	"BUILD_KOWSU": [
+		config(name="KowSU", KSU="KOWSU")
+	],
+	"BUILD_RKSU_SUSFS": [
+		config(name="RKSU+SUSFS", KSU="RKSU", KSU_SUSFS="true"),
+		config(name="Compat+RKSU+SUSFS", KSU="RKSU", KSU_COMPAT="true", KSU_SUSFS="true")
+	],
+	"BUILD_MAMBO_SUSFS": [
+		config(name="MamboSU+SUSFS", KSU="MAMBO", KSU_SUSFS="true"),
+		config(name="Compat+MamboSU+SUSFS", KSU="MAMBO", KSU_COMPAT="true", KSU_SUSFS="true")
 	]
 }
 

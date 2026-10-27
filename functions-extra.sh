@@ -96,7 +96,7 @@ bakasu_compat() {
 
     # Stubs for symbols the SUSFS patch declares extern, only for those BakaSU doesn't define globally
     for sym in my_write_context my_write_access my_setprocattr ksu_setup_preinit_file ksu_preinit_handle_post_execveat; do
-        grep -rqE "^(ssize_t|int) $sym\(" "$root/kernel" --include=*.c || need+=("$sym")
+        grep -rqE "^[[:space:]]*(ssize_t|int)[[:space:]]+$sym[[:space:]]*\(" "$root/kernel" --include='*.c' || need+=("$sym")
     done
     ((${#need[@]})) || { log "BakaSU already provides all SUSFS symbols"; return 0; }
     for sym in "${need[@]}"; do
