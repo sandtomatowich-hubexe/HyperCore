@@ -30,6 +30,11 @@ External pieces his pipeline uses, which this one still pulls in:
 | DroidSpaces kernel config | ravindu644 | `configs/droidspaces.config` |
 | Neutron clang / antman | Neutron-Toolchains | Compiler |
 | AnyKernel3 | osm0sis | Flashable zips |
+| AnyKernel3 (GKI builder) | LingLuo17 | FinaSU in-tree integration and manager certificate slot, Re-Kernel integration steps, `scripts/finasu/extract_manager_cert.py`, and the upgraded LZ4 / NEON files in `zram/` (GPL-3.0) |
+| GKI_KernelSU_SUSFS | WildKernels, zzh20188 | KernelSU-Next, BakaSU and FinaSU integration steps, BakaSU SUSFS compat stubs (GPL-3.0) |
+| KernelSU-Next (SUSFS fork) | pershoot | `dev-susfs` branch and susfs4ksu fixes |
+| Re-Kernel | Sakion-Team | Re-Kernel driver |
+| SukiSU_patch | ShirkNeko | LZ4K, LZ4KD and LZ4K_OPLUS zram sources and patches |
 | pahole | kernel.org / Arnaldo Carvalho de Melo | BTF generation |
 
 If you maintain one of these and want the credit changed, please open an issue.

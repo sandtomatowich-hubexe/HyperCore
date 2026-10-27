@@ -84,10 +84,14 @@ if [ "$ZSTD" = "true" ]; then
   echo "🗜️ zram: LZ4 + ZSTD"
   apply_config "$WORKDIR/configs/zstd.config" "$DEFCONFIG"
 fi
-for feat in LZ4KD REKERNEL; do
-  f="$WORKDIR/extra-patches/${feat,,}.config"
-  if [ "${!feat:-false}" = "true" ] && [ -f "$f" ]; then
-    echo "➕ $feat configs"
-    apply_config "$f" "$DEFCONFIG"
+if [ "$REKERNEL" = "true" ]; then
+  echo "🔔 Re-Kernel"
+  apply_config "$WORKDIR/configs/rekernel.config" "$DEFCONFIG"
+fi
+if [ "$LZ4KD" = "true" ]; then
+  echo "zram: LZ4K / LZ4KD"
+  apply_config "$WORKDIR/configs/lz4kd.config" "$DEFCONFIG"
+  if ! kernel_version_lt "$KERNEL_VERSION" 6.12; then
+    printf 'CONFIG_ZRAM_BACKEND_LZ4K=y\nCONFIG_ZRAM_BACKEND_LZ4KD=y\nCONFIG_ZRAM_BACKEND_LZ4K_OPLUS=y\n' >> "$DEFCONFIG"
   fi
-done
+fi

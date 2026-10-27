@@ -219,20 +219,22 @@ if susfs_included && [ "$KSU" = "BSU" ]; then
 
   clone_susfs
   apply_susfs_patches
+  bakasu_compat
   add_multi_managers
 
 fi
 
 if [ "$KSU" = "KSUN" ]; then
   log "KernelSU-Next included"
-  install_ksu_fork "KernelSU-Next/KernelSU-Next" "${KSUN_REF:-dev-susfs}"
+  install_ksun
   add_multi_managers
 fi
 
 if [ "$KSU" = "FINA" ]; then
   log "FinaSU included"
-  install_ksu_fork "LyraVoid/FinaSU" "${FINA_REF:-main}"
-  add_multi_managers
+  install_finasu
+  clone_susfs
+  apply_susfs_patches
 fi
 
 if [ "$KSU" = "KSU" ]; then
@@ -270,6 +272,8 @@ if [ "$KSU" = "KSU" ]; then
 fi
 
 apply_extra_features
+apply_lz4kd
+apply_rekernel
 
 if [ "$KSU_COMPAT" = "true" ]; then
   if [ "$C_LTO" = "true" ]; then
@@ -503,3 +507,4 @@ cd $OLDPWD
 echo "BASE_NAME=$KERNEL_NAME-$VARIANT" >> $GITHUB_ENV
 mkdir -p $RELEASE_DIR
 mv $WORKDIR/*.zip $RELEASE_DIR
+write_tg_meta "$AK3_ZIP_NAME"

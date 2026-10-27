@@ -1,0 +1,6 @@
+These files come from LingLuo17/AnyKernel3 (zram/), GPL-3.0:
+  lz4/               upgraded LZ4 library with an ARM64 NEON decompressor (lz4armv8)
+  include/linux/     matching lz4.h
+  apply_lz4_neon.sh  wires the NEON decompressor into crypto/lz4*.c, f2fs and incfs
+They are applied to the kernel tree only when the LZ4KD option is enabled.
+Original copyright notices inside each file are unchanged. See CREDITS.md.

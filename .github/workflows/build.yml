@@ -89,7 +89,7 @@ on:
         default: false
 
       MM:
-        description: "Multi-manager signatures on BakaSU / KSU-Next / FinaSU"
+        description: "Try multi-manager signatures on BakaSU / KSU-Next (falls back to the fork's own support)"
         type: boolean
         default: true
 
@@ -99,12 +99,12 @@ on:
         default: false
 
       LZ4KD:
-        description: "zram LZ4KD (needs extra-patches/lz4kd.patch)"
+        description: "zram LZ4KD (LZ4 upgrade + NEON, patches from SukiSU_patch)"
         type: boolean
         default: false
 
       REKERNEL:
-        description: "Re:Kernel (needs extra-patches/rekernel.patch)"
+        description: "Re:Kernel (built in from Sakion-Team/Re-Kernel)"
         type: boolean
         default: false
 
@@ -206,9 +206,11 @@ jobs:
           NH: ${{ inputs.NH }}
           NM: ${{ inputs.NM }}
           MM: ${{ inputs.MM }}
+          GITHUB_TOKEN: ${{ github.token }}
           BSU_REF: ${{ vars.BSU_REF }}
           KSUN_REF: ${{ vars.KSUN_REF }}
           FINA_REF: ${{ vars.FINA_REF }}
+          KSUN_REPO: ${{ vars.KSUN_REPO }}
           ZSTD: ${{ inputs.ZSTD }}
           LZ4KD: ${{ inputs.LZ4KD }}
           REKERNEL: ${{ inputs.REKERNEL }}
@@ -330,8 +332,8 @@ jobs:
           name: all-builds-${{ github.run_number }}
           retention-days: 7
           path: |
-            downloaded-artifacts/artifacts/*.txt
-            downloaded-artifacts/artifacts/*.zip
+            downloaded-artifacts/*.txt
+            downloaded-artifacts/*.zip
 
   release:
     needs: build
@@ -354,13 +356,21 @@ jobs:
       - name: Generate Checksums
         run: |
           cd release-artifacts
-          sha256sum *.zip > checksums.txt
-          md5sum *.zip > checksums-md5.txt
+          shopt -s nullglob
+          zips=( *.zip )
+          if (( ${#zips[@]} == 0 )); then
+            echo "::warning::No ZIP artifacts were produced; writing empty checksum files."
+            : > checksums.txt
+            : > checksums-md5.txt
+          else
+            sha256sum "${zips[@]}" > checksums.txt
+            md5sum "${zips[@]}" > checksums-md5.txt
+          fi
 
       - name: Load environment from builds and prepare release body
         env:
           TEST_INPUT: ${{ inputs.TEST }}
-          DROIDSPACES_INPUT: ${{ inputs.DroidSpaces }}
+          DROIDSPACES_INPUT: ${{ inputs.DROIDSPACES }}
           NH_INPUT: ${{ inputs.NH }}
           NM_INPUT: ${{ inputs.NM }}
           LTO_INPUT: ${{ inputs.LTO }}
