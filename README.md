@@ -182,6 +182,8 @@ works.
    | `KERNEL_BRAND` | Prefix of the zip names (default `GKI`) |
    | `ANYKERNEL_REPO` | Your AnyKernel3 repository |
    | `BSU_REF`, `KSUN_REF`, `KSUN_REPO`, `FINA_REF` | Pin a root fork to another branch, tag or repository |
+   | `SUSFS_COMMIT` | Pin susfs4ksu to one commit for every variant (default: the branch tip) |
+   | `BSU_ALLOW_SUSFS_MISMATCH` | `true` removes BakaSU's own SUSFS version guard. Off by default, because it can produce a kernel that builds but misbehaves |
 
 4. Optional repository secrets for Telegram: `BOT_TOKEN`, `CHAT_ID`, `TOPIC_ID`. See [Telegram releases](#telegram-releases).
 5. Actions, **Kernel Builder**, Run workflow. Choose your options and wait. The first test run, with seven 6.1 variants
@@ -249,6 +251,8 @@ always arrives. If part of the build failed, an extra message tells you so and l
 | Bootloop after flashing | Flash a `Compat` build, or restore the stock `boot.img` |
 | Manager says "not installed" | The manager must match the variant (FinaSU needs its own manager, BakaSU its own, and so on) |
 | `has no branch/tag 'x'` | That branch does not exist on the fork. Set `BSU_REF`, `KSUN_REF`, `KSUN_REPO` or `FINA_REF` |
+| `duplicate symbol: my_...` or `undefined symbol: my_...` while linking BakaSU | The SUSFS hooks are classified from the real source at build time, so this should not happen any more. If it does, send the `BakaSU SUSFS hook check` table from the job summary |
+| `BakaSU blocks this SUSFS revision` | BakaSU's maintainers refuse SUSFS revisions they have not caught up with. Pin `SUSFS_COMMIT` to a revision that works, or pin `BSU_REF` |
 | `does not apply` for a patch | An upstream fork changed. Open the failed job: the message names the patch and the step |
 | `LZ4KD needs ... does not exist` | SukiSU_patch has no zram patches for that kernel line. Turn `LZ4KD` off for that line |
 | `sha256sum: '*.zip': No such file` in the release job | Every build failed, so there is nothing to release. Fix the build errors first |

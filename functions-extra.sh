@@ -32,6 +32,10 @@ add_multi_managers() {
         (cd "$root" && git apply "$PATCHES_DIR/0001-feat-add-multiple-managers.patch")
         success "Extra manager signatures applied"
         VARIANT+="+MM"
+    elif [ "$KSU" = "BSU" ] && grep -rqs --include='Kconfig*' 'KSU_MULTI_MANAGER_SUPPORT' "$root/kernel"; then
+        export MM_KCONFIG=true
+        log "BakaSU has its own multi-manager option; enabling CONFIG_KSU_MULTI_MANAGER_SUPPORT"
+        VARIANT+="+MM"
     else
         warning "Multi-manager patch does not fit this fork; using the fork's own manager support"
     fi
@@ -79,38 +83,78 @@ install_ksun() {
     apply_susfs_patches
 }
 
-# BakaSU: kernel-side compat so the susfs4ksu 50_add patch builds and links (WildKernels/GKI_KernelSU_SUSFS)
+# BakaSU: kernel-side compat so the susfs4ksu 50_add patch builds and links.
+# The SUSFS patch calls a few hooks that BakaSU may define globally, define statically, or not define at all.
+# Each hook is classified from the final source (scripts/bakasu/classify_hooks.py) and handled accordingly:
+#   global  -> nothing to do, BakaSU's own implementation is linked
+#   static  -> the `static` keyword is removed so BakaSU's real implementation is exported
+#   missing -> a weak stub is generated (a strong definition anywhere else always wins, so it can never clash)
+# Approach for the stubs from WildKernels/GKI_KernelSU_SUSFS, see CREDITS.md.
 bakasu_compat() {
-    local root kb mk sym need=() body=""
+    local root kb mk tool="$WORKDIR/scripts/bakasu/classify_hooks.py"
+    local sym st file row refs=() need=() expo=() body="" rows=()
     root="$(ksu_root_dir)"; kb="$root/kernel/Kbuild"; mk="$root/kernel/tools/susfs_compat.mk"
+
+    log "BakaSU @ $(command git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown) | SUSFS @ $(command git -C "$SUSFS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
     # Kbuild refuses code that isn't a git submodule
     sed -i 's/$(error You should use $(REPO_NAME) as a git submodule instead of copying code directly)/$(warning You should use $(REPO_NAME) as a git submodule instead of copying code directly)/' "$kb"
 
-    # susfs_compat.mk ends with an unconditional $(error "Please wait susfs update.") on SUSFS builds;
-    # keep its compat defines above that gate and drop the tail
+    # BakaSU can refuse SUSFS revisions it has not caught up with. That guard exists to prevent a kernel that
+    # builds but misbehaves, so it is only bypassed on explicit request.
     if [ -f "$mk" ] && grep -q 'Please wait susfs update' "$mk"; then
-        sed -i '/susfs has NOT update with latest KernelSU source/,$d' "$mk"
-        log "Stripped susfs_compat hard stop"
+        if [ "${BSU_ALLOW_SUSFS_MISMATCH:-false}" = "true" ]; then
+            warning "Removing BakaSU's SUSFS hard stop on request (BSU_ALLOW_SUSFS_MISMATCH=true); this BakaSU/SUSFS pair is NOT confirmed to work"
+            sed -i '/susfs has NOT update with latest KernelSU source/,$d' "$mk"
+        else
+            error "BakaSU blocks this SUSFS revision ($(command git -C "$SUSFS_DIR" rev-parse --short HEAD)). Pin SUSFS with the SUSFS_COMMIT variable, pin BakaSU with BSU_REF, or set BSU_ALLOW_SUSFS_MISMATCH=true to override at your own risk."
+            exit 1
+        fi
     fi
 
-    # Stubs for symbols the SUSFS patch declares extern, only for those BakaSU doesn't define globally
+    # Only hooks the patched kernel really calls matter
     for sym in my_write_context my_write_access my_setprocattr ksu_setup_preinit_file ksu_preinit_handle_post_execveat; do
-        grep -rqE "^[[:space:]]*(ssize_t|int)[[:space:]]+$sym[[:space:]]*\(" "$root/kernel" --include='*.c' || need+=("$sym")
+        if grep -rqw --include='*.c' --include='*.h' "$sym" "$KSRC/fs" "$KSRC/security" "$KSRC/kernel" "$KSRC/include" "$KSRC/mm" 2>/dev/null; then
+            refs+=("$sym")
+        fi
     done
-    ((${#need[@]})) || { log "BakaSU already provides all SUSFS symbols"; return 0; }
-    for sym in "${need[@]}"; do
-        case "$sym" in
-            my_write_context)  body+='ssize_t my_write_context(struct file *file, char *buf, size_t size) { return -EINVAL; }'$'\n' ;;
-            my_write_access)   body+='ssize_t my_write_access(struct file *file, char *buf, size_t size) { return -EINVAL; }'$'\n' ;;
-            my_setprocattr)    body+='int my_setprocattr(const char *name, void *value, size_t size) { return 0; }'$'\n' ;;
-            ksu_setup_preinit_file) body+='int ksu_setup_preinit_file(struct filename **filename_ptr, struct user_arg_ptr *argv_user) { return -EINVAL; }'$'\n' ;;
-            ksu_preinit_handle_post_execveat) body+='int ksu_preinit_handle_post_execveat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *flags, int *retval, int *preinit_fd) { return 0; }'$'\n' ;;
+    ((${#refs[@]})) || { log "The patched kernel calls none of the BakaSU SUSFS hooks"; return 0; }
+
+    mapfile -t rows < <(python3 "$tool" "$root/kernel" "${refs[@]}")
+    {
+        echo "### BakaSU SUSFS hook check"
+        echo "| Hook | State in BakaSU |"
+        echo "|---|---|"
+    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    for row in "${rows[@]}"; do
+        read -r sym st file <<< "$row"
+        echo "| \`$sym\` | $st |" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        case "$st" in
+            global)  log "$sym: provided by BakaSU (${file#$root/})" ;;
+            static)  expo+=("$sym") ;;
+            missing) need+=("$sym") ;;
+            *)       error "Unexpected classifier output: $row"; exit 1 ;;
         esac
     done
-    { printf '%s\n' '/* SUSFS compat stubs (approach from WildKernels/GKI_KernelSU_SUSFS) */' '#include <linux/fs.h>' 'struct filename;' 'struct user_arg_ptr;'; printf '%s' "$body"; } > "$root/kernel/bakasu_susfs_compat.c"
+
+    if ((${#expo[@]})); then
+        python3 "$tool" --export-static "$root/kernel" "${expo[@]}" >/dev/null
+        warning "Exported BakaSU's static hooks: ${expo[*]}"
+    fi
+
+    ((${#need[@]})) || return 0
+    for sym in "${need[@]}"; do
+        case "$sym" in
+            my_write_context)  body+='__attribute__((weak)) ssize_t my_write_context(struct file *file, char *buf, size_t size) { return -EINVAL; }'$'\n' ;;
+            my_write_access)   body+='__attribute__((weak)) ssize_t my_write_access(struct file *file, char *buf, size_t size) { return -EINVAL; }'$'\n' ;;
+            my_setprocattr)    body+='__attribute__((weak)) int my_setprocattr(const char *name, void *value, size_t size) { return 0; }'$'\n' ;;
+            ksu_setup_preinit_file) body+='__attribute__((weak)) int ksu_setup_preinit_file(struct filename **filename_ptr, struct user_arg_ptr *argv_user) { return -EINVAL; }'$'\n' ;;
+            ksu_preinit_handle_post_execveat) body+='__attribute__((weak)) int ksu_preinit_handle_post_execveat(int *fd, struct filename **filename_ptr, void *argv_user, void *envp_user, int *flags, int *retval, int *preinit_fd) { return 0; }'$'\n' ;;
+        esac
+    done
+    { printf '%s\n' '/* Weak SUSFS compat stubs: only used when BakaSU defines no strong version (approach from WildKernels/GKI_KernelSU_SUSFS) */' '#include <linux/fs.h>' 'struct filename;' 'struct user_arg_ptr;'; printf '%s' "$body"; } > "$root/kernel/bakasu_susfs_compat.c"
     grep -q 'bakasu_susfs_compat.o' "$kb" || printf '\n# SUSFS compat stubs\nobj-y += bakasu_susfs_compat.o\n' >> "$kb"
-    warning "Added SUSFS compat stubs for: ${need[*]}"
+    warning "Added weak SUSFS compat stubs for: ${need[*]}"
 }
 
 # FinaSU: its kernel/setup.sh clones upstream tiann/KernelSU, so integrate it in-tree by hand,

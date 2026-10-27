@@ -554,7 +554,7 @@ apply_susfs_patches() {
 
 clone_susfs() {
     DEPTH=${1:-1}
-    local pin="${GKI_SUSFS_COMMIT[$KERNEL_VERSION]:-}"
+    local pin="${SUSFS_COMMIT:-${GKI_SUSFS_COMMIT[$KERNEL_VERSION]:-}}"
 
     if [ ! -d "$SUSFS_DIR" ]; then
         if [ -n "$pin" ]; then

@@ -95,3 +95,8 @@ if [ "$LZ4KD" = "true" ]; then
     printf 'CONFIG_ZRAM_BACKEND_LZ4K=y\nCONFIG_ZRAM_BACKEND_LZ4KD=y\nCONFIG_ZRAM_BACKEND_LZ4K_OPLUS=y\n' >> "$DEFCONFIG"
   fi
 fi
+
+if [ "$MM_KCONFIG" = "true" ]; then
+  echo "BakaSU multi-manager support"
+  printf 'CONFIG_KSU_MULTI_MANAGER_SUPPORT=y\n' >> "$DEFCONFIG"
+fi

@@ -27,3 +27,5 @@ GPL-3.0 and keep the original copyright and authorship notices (including those 
 - LZ4KD builds in the upgraded LZ4 library and NEON decompressor (`zram/`, copied from LingLuo17/AnyKernel3) and the LZ4K/LZ4KD zram patches from ShirkNeko/SukiSU_patch, fetched at build time
 - Each build writes a `<zip>.meta.json` that the Telegram bot uses to describe the kernel; the bot sends rich messages and falls back to plain documents
 - README rewritten
+- BakaSU SUSFS hooks are classified from the final source (`scripts/bakasu/classify_hooks.py`): global hooks are left alone, static ones are exported, missing ones get weak stubs. This replaces the regex check that produced duplicate symbols. BakaSU's SUSFS version guard is no longer removed unless `BSU_ALLOW_SUSFS_MISMATCH=true`
+- `SUSFS_COMMIT` repository variable pins susfs4ksu; BakaSU multi-manager is enabled through its own Kconfig option when the signature patch does not fit
