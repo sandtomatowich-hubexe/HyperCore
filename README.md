@@ -31,13 +31,15 @@ Pick the options, run one workflow, get flashable zips, checksums, a GitHub Rele
 6. [Root managers](#root-managers)
 7. [Build it yourself](#build-it-yourself)
 8. [Workflow options](#workflow-options)
-9. [Telegram releases](#telegram-releases)
-10. [Troubleshooting](#troubleshooting)
-11. [Repository layout](#repository-layout)
-12. [FAQ](#faq)
-13. [Credits](#credits)
-14. [Star history](#star-history)
-15. [Disclaimer](#disclaimer)
+9. [Kernel source](#kernel-source)
+10. [Exact kernel version](#exact-kernel-version)
+11. [Telegram releases](#telegram-releases)
+12. [Troubleshooting](#troubleshooting)
+13. [Repository layout](#repository-layout)
+14. [FAQ](#faq)
+15. [Credits](#credits)
+16. [Star history](#star-history)
+17. [Disclaimer](#disclaimer)
 
 ## Overview
 
@@ -178,11 +180,13 @@ works.
 
    | Variable | Purpose |
    |---|---|
-   | `KERNEL_REPO` | Your device's GKI kernel source (default `ahmed-alnassif/GKI-Duchamp-6.1`) |
+   | `KERNEL_REPO`, `KERNEL_BRANCH`, `KERNEL_BRANCH_NH` | Kernel source for the 6.1 base. See [Kernel source](#kernel-source) |
+   | `KERNEL_REPO_<base>`, `KERNEL_BRANCH_<base>` | Kernel source for any base, written `5_10`, `5_15`, `6_1`, `6_6`, `6_12` |
    | `KERNEL_BRAND` | Prefix of the zip names (default `GKI`) |
    | `ANYKERNEL_REPO` | Your AnyKernel3 repository |
    | `BSU_REF`, `KSUN_REF`, `KSUN_REPO`, `FINA_REF` | Pin a root fork to another branch, tag or repository |
    | `SUSFS_COMMIT` | Pin susfs4ksu to one commit for every variant (default: the branch tip) |
+   | `ALLOW_SKIPPED_PATCHES` | `true` lets an exact-version build continue when some patches do not apply |
    | `BSU_ALLOW_SUSFS_MISMATCH` | `true` removes BakaSU's own SUSFS version guard. Off by default, because it can produce a kernel that builds but misbehaves |
 
 4. Optional repository secrets for Telegram: `BOT_TOKEN`, `CHAT_ID`, `TOPIC_ID`. See [Telegram releases](#telegram-releases).
@@ -197,6 +201,7 @@ Start with one variant when testing changes, then enable the rest. A failure in 
 | Input | Default | What it does |
 |---|---|---|
 | `KERNEL_VERSION` | `6.1` | Kernel line: `5.10`, `5.15`, `6.1`, `6.6`, `6.12` or `All` |
+| `KERNEL_EXACT_VERSION` | empty | Exact Linux version inside the selected line, for example `6.1.180`. Empty keeps the branch default. See [Exact kernel version](#exact-kernel-version) |
 | `LTO` | `fullLTO` | `noneLTO`, `thinLTO` or `fullLTO`. Full LTO is the slowest and needs the most RAM |
 | `BUILD_VANILLA` | on | Vanilla and Vanilla+NoLTO |
 | `BUILD_KSU` | on | KernelSU without SUSFS |
@@ -213,6 +218,75 @@ Start with one variant when testing changes, then enable the rest. A failure in 
 | `CLEAN_LTO_CACHE` | on | Clears the ThinLTO cache to avoid a known `.config` bug |
 | `TODO` | `kernel` | `defconfig` exports the generated defconfig instead of building a kernel |
 | `TEST` | `no` | `yes` skips the compile and produces placeholder zips, to test the pipeline |
+
+## Kernel source
+
+HyperCore is the build and workflow repository. The kernel itself is fetched from an **external repository**, and the job
+summary says so explicitly.
+
+| Base | Default repository | Default branch |
+|---|---|---|
+| 6.1 | `ahmed-alnassif/GKI-Duchamp-6.1` (the device source) | `GKID-NH` when `NH` is on (the default), otherwise `GKID-6.1` |
+| 5.10 | `android.googlesource.com/kernel/common` | `android12-5.10-lts` |
+| 5.15 | `android.googlesource.com/kernel/common` | `android13-5.15-lts` |
+| 6.6 | `android.googlesource.com/kernel/common` | `android15-6.6-lts` |
+| 6.12 | `android.googlesource.com/kernel/common` | `android16-6.12-lts` |
+
+The defaults are intentional upstream sources and are not hardcoded into the workflow file. To use your own source, set
+repository variables. The most specific one wins:
+
+1. `KERNEL_REPO_<base>` and `KERNEL_BRANCH_<base>` for any base, for example `KERNEL_REPO_5_10`.
+2. For 6.1 only: `KERNEL_REPO`, and `KERNEL_BRANCH` (or `KERNEL_BRANCH_NH` for NetHunter builds).
+3. The built-in defaults above.
+
+`KERNEL_REPO` and `KERNEL_BRANCH` without a base suffix apply to 6.1 only. They are ignored, with a warning, for the other
+bases, so a device repository can never be built as the wrong kernel line. A repository is an `https://` URL or
+`owner/repo`; the branch is configured separately from the repository.
+
+After cloning, the build reads the repository, branch, commit and tag back from the checked-out tree and compares them with
+what was configured. If they differ, the build stops. The job summary then lists this repository and its commit, the kernel
+source repository and where its value came from (built-in default or which variable), the branch, the resolved commit with
+a link, the tag if any, the submodule commits, the kernel base, the requested exact version and the resulting Linux version.
+It works together with [Exact kernel version](#exact-kernel-version): the exact version is searched on the configured
+repository and branch.
+
+## Exact kernel version
+
+`KERNEL_VERSION` selects the kernel line. `KERNEL_EXACT_VERSION` optionally selects one release inside it.
+
+| KERNEL_VERSION | KERNEL_EXACT_VERSION | Result |
+|---|---|---|
+| `6.1` | empty | The current branch tip, exactly as before |
+| `6.1` | `6.1.180` | The source state that reports Linux 6.1.180 |
+| `5.10` | `5.10.209` | The source state that reports Linux 5.10.209 |
+| `5.10` | `6.1.180` | Rejected before anything is built: 6.1.180 belongs to the 6.1 line |
+| `All` | `6.1.180` | Rejected: an exact version needs a single kernel line |
+
+**Where the source comes from.** GKI kernels need Android's patches (ABI, vendor hooks), so a plain kernel.org tag would
+not be a GKI kernel. The exact version is therefore searched on the [configured kernel source](#kernel-source): by default the
+device repository for 6.1, and the Android Common Kernel `-lts` branches for 5.10, 5.15, 6.6 and 6.12. Those branches merge every
+upstream stable release, so each release appears in their history.
+
+**How the version is found.** The branch history is fetched without file contents, then a binary search over the
+`VERSION`, `PATCHLEVEL` and `SUBLEVEL` lines of the top-level Makefile finds the last commit that still reports the
+requested version. That is the branch state right before the next release was merged, so it contains the fixes that
+landed for that release. After checkout, `make kernelversion` must report exactly the requested version or the build stops.
+If the version does not exist on the branch, the error names the nearest versions that do.
+
+**What is recorded.** Every build, with or without an exact version, writes the kernel repository, branch, resolved commit
+and susfs4ksu commit to the job summary, and the release notes show the kernel and susfs4ksu commits.
+
+**Compatibility.** The patch set is written against the current branch tips, so older releases can need extra care:
+
+| Area | Behaviour with an exact version |
+|---|---|
+| SUSFS | The patch matches the susfs4ksu branch tip. For an older release, pin a matching revision with `SUSFS_COMMIT` |
+| Kernel patches (BBRv3, NTSync, DroidSpaces, KernelSU hooks) | Applied with the same fuzz as always. A patch that does not apply is listed in the job summary. With an exact version the build then **stops**, so a feature is never silently missing. Set the variable `ALLOW_SKIPPED_PATCHES` to `true` to build without those patches |
+| LZ4KD | Needs zram patches for that release in SukiSU_patch; the build stops with a message if they are missing |
+| 6.1 | Built from the device repository, so only releases present in its history exist, and older ones may predate its device patches |
+| Other lines | Android Common Kernel history; the first fetch is larger than a normal clone |
+
+Default builds (empty `KERNEL_EXACT_VERSION`) behave exactly as before: skipped patches are only reported, not fatal.
 
 ## Telegram releases
 
@@ -253,6 +327,9 @@ always arrives. If part of the build failed, an extra message tells you so and l
 | `has no branch/tag 'x'` | That branch does not exist on the fork. Set `BSU_REF`, `KSUN_REF`, `KSUN_REPO` or `FINA_REF` |
 | `duplicate symbol: my_...` or `undefined symbol: my_...` while linking BakaSU | The SUSFS hooks are classified from the real source at build time, so this should not happen any more. If it does, send the `BakaSU SUSFS hook check` table from the job summary |
 | `BakaSU blocks this SUSFS revision` | BakaSU's maintainers refuse SUSFS revisions they have not caught up with. Pin `SUSFS_COMMIT` to a revision that works, or pin `BSU_REF` |
+| `X does not exist on ... Nearest versions` | That Linux release is not in the branch history. Use one of the versions named in the message |
+| `belongs to the 6.1 line, but the selected kernel base is 5.10` | The exact version and `KERNEL_VERSION` must be the same line |
+| `patches above do not apply to it` | The exact release is too old or too new for the patch set. Pin `SUSFS_COMMIT`, choose another release, or set `ALLOW_SKIPPED_PATCHES=true` |
 | `does not apply` for a patch | An upstream fork changed. Open the failed job: the message names the patch and the step |
 | `LZ4KD needs ... does not exist` | SukiSU_patch has no zram patches for that kernel line. Turn `LZ4KD` off for that line |
 | `sha256sum: '*.zip': No such file` in the release job | Every build failed, so there is nothing to release. Fix the build errors first |

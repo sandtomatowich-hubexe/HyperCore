@@ -44,15 +44,7 @@ if [ "${KSU:-}" = "MAMBO" ] && [ -z "${MAMBOSU_REPO:-}" ]; then
   exit 1
 fi
 
-if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
-  if [ "$NH" = "true" ]; then
-    KERNEL_BRANCH="GKID-NH"
-  else
-    KERNEL_BRANCH="GKID-6.1"
-  fi
-else
-  IFS='|' read -r KERNEL_REPO KERNEL_BRANCH KERNEL_KMI <<< "$(resolve_kernel_source "$KERNEL_VERSION")"
-fi
+resolve_kernel_source_config
 
 ANDROID_RELEASE="$(android_release_for_version "$KERNEL_VERSION")"
 echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
@@ -74,14 +66,12 @@ trap 'echo "[-] Received SIGTERM at $(date) - possible GitHub kill" >> "$BUILD_L
 trap 'echo "[-] Received SIGINT at $(date)" >> "$BUILD_LOGS"' INT
 
 log "Cloning kernel source from $(simplify_gh_url "$KERNEL_REPO")"
-if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
-  git clone -q --depth=1 --recurse-submodules "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
-else
-  git clone -q --depth=1 "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
-fi
+clone_kernel_source
 
 cd $KSRC
 LINUX_VERSION=$(make kernelversion)
+verify_exact_kernel_version
+record_kernel_source
 LINUX_VERSION_CODE=${LINUX_VERSION//./}
 DEFCONFIG_FILE=$(find ./arch/arm64/configs -name "$KERNEL_DEFCONFIG")
 echo "LINUX_VERSION=$LINUX_VERSION" >> $GITHUB_ENV
@@ -121,8 +111,9 @@ cd "$SUSFS_DIR"
 git log --pretty=format:"- [%h](https://${SUSFS_URL#https://}/commit/%H) %s" -5 "$SUSFS_BRANCH" \
 > "$RELEASE_DIR/susfs_changelog-${KERNEL_VERSION}.txt"
 cd ..
+record_patch_sources
 
-if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
+if kernel_version_eq "$KERNEL_VERSION" "6.1" && [[ "$KERNEL_REPO" == https://github.com/* ]]; then
   generate_gh_changelog "$(simplify_gh_url "$KERNEL_REPO")" "$KERNEL_BRANCH" 10 "$RELEASE_DIR/android_kernel-6.1_changelog.txt"
 else
   echo "No changelog generator wired up yet for $KERNEL_VERSION" \
@@ -354,6 +345,8 @@ AK3_ZIP_NAME=${AK3_ZIP_NAME//KVER/$LINUX_VERSION}
 AK3_ZIP_NAME=${AK3_ZIP_NAME//VARIANT/$VARIANT}
 
 log "Applying configs..."
+report_skipped_patches
+
 source "$WORKDIR/configs/gki_defconfig.sh"
 
 if [ "${TODO:-kernel}" = "kernel" ]; then

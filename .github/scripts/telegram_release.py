@@ -106,6 +106,14 @@ def root_label(meta):
     return label, f"https://github.com/{r['repo']}" if r.get("repo") else None
 
 
+def source_urls(repo, branch):
+    """Links for the kernel source: GitHub owner/repo, or a full URL such as android.googlesource.com."""
+    if repo.startswith("http"):
+        base = repo.rstrip("/")
+        return base, f"{base}/+/refs/heads/{branch}"
+    return f"https://github.com/{repo}", f"https://github.com/{repo}/tree/{branch}"
+
+
 def build_blocks(meta, zip_path, attach):
     ft = meta.get("features") or {}
     repo, branch = meta.get("source_repo", ""), meta.get("source_branch", "")
@@ -113,9 +121,10 @@ def build_blocks(meta, zip_path, attach):
         [cell("Kernel"), cell(f"Linux {meta.get('linux', '')}")],
     ]
     if repo:
-        t1.append([cell("Source"), cell(chip(repo.split("/")[-1], f"https://github.com/{repo}"))])
+        repo_url, branch_url = source_urls(repo, branch)
+        t1.append([cell("Source"), cell(chip(repo.rstrip("/").split("/")[-1], repo_url))])
         if branch:
-            t1.append([cell("Branch"), cell(chip(branch, f"https://github.com/{repo}/tree/{branch}"))])
+            t1.append([cell("Branch"), cell(chip(branch, branch_url))])
     t1.append([cell("Toolchain"), cell(toolchain(meta.get("compiler")))])
     t1.append([cell("LTO"), cell(chip(lto_label(meta.get("lto"))))])
 

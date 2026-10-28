@@ -310,3 +310,187 @@ with open(e("META_OUT"), "w") as f:
     json.dump(meta, f, indent=1)
 PY
 }
+
+# ---------------------------------------------------------------------------------------------------------
+# Exact kernel version selection and reproducibility records
+# ---------------------------------------------------------------------------------------------------------
+
+# Clone the kernel source. Without KERNEL_EXACT_VERSION this is the original shallow clone of the branch tip.
+# With it, the branch history is fetched commit-only (no file contents), the commit that carries exactly that
+# Linux version is found from the Makefile (py/resolve_kernel_commit.py) and checked out.
+clone_kernel_source() {
+    if [ -z "${KERNEL_EXACT_VERSION:-}" ]; then
+        if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
+            git clone -q --depth=1 --recurse-submodules "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
+        else
+            git clone -q --depth=1 "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
+        fi
+        return 0
+    fi
+
+    python3 "$WORKDIR/py/kernelver.py" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION" || exit 1
+    log "Exact kernel version requested: $KERNEL_EXACT_VERSION (base $KERNEL_VERSION)"
+
+    # Servers that do not support partial clones ignore the filter and send the full history instead
+    git clone -q --filter=tree:0 --no-checkout --single-branch "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
+    local res sha
+    res="$(python3 "$WORKDIR/py/resolve_kernel_commit.py" "$KSRC" "refs/remotes/origin/$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION")" \
+        || { error "Could not find Linux $KERNEL_EXACT_VERSION on $KERNEL_BRANCH"; exit 1; }
+    sha="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
+    log "Linux $KERNEL_EXACT_VERSION is commit $sha"
+    command git -C "$KSRC" checkout -q --detach "$sha"
+    if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
+        command git -C "$KSRC" submodule update --init --recursive --depth 1 -q \
+            || command git -C "$KSRC" submodule update --init --recursive -q
+    fi
+}
+
+# The checked-out tree must report exactly the version that was asked for
+verify_exact_kernel_version() {
+    [ -n "${KERNEL_EXACT_VERSION:-}" ] || return 0
+    if [ "${LINUX_VERSION%%[!0-9.]*}" != "$KERNEL_EXACT_VERSION" ]; then
+        error "Requested Linux $KERNEL_EXACT_VERSION but the source reports $LINUX_VERSION"
+        exit 1
+    fi
+}
+
+# Record exactly what was built from, for reproducibility (job summary, build env, release notes).
+# Everything is read back from the checked-out tree, then compared with what was configured.
+record_kernel_source() {
+    local sha origin branch tag link subs repo_label
+    sha="$(command git -C "$KSRC" rev-parse HEAD)"
+    origin="$(command git -C "$KSRC" remote get-url origin 2>/dev/null || true)"
+    branch="$(command git -C "$KSRC" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    tag="$(command git -C "$KSRC" describe --tags --exact-match HEAD 2>/dev/null || true)"
+    subs="$(command git -C "$KSRC" submodule status 2>/dev/null | sed 's/^[ +-]//' || true)"
+
+    # the tree must come from the configured repository and branch
+    [ "${origin%.git}" = "${KERNEL_REPO%.git}" ] \
+        || { error "Kernel source mismatch: configured $KERNEL_REPO but the checkout came from ${origin:-unknown}"; exit 1; }
+    if [ -z "${KERNEL_EXACT_VERSION:-}" ] && [ "$branch" != "$KERNEL_BRANCH" ]; then
+        error "Kernel source mismatch: configured branch $KERNEL_BRANCH but the checkout is on ${branch:-unknown}"; exit 1
+    fi
+
+    KERNEL_COMMIT="$sha"
+    repo_label="$(simplify_gh_url "$origin")"
+    case "$origin" in
+        *github.com*) link="https://github.com/$repo_label/commit/$sha" ;;
+        *)            link="${origin%.git}/+/$sha" ;;
+    esac
+    {
+        echo "KERNEL_COMMIT=$sha"
+        echo "KERNEL_EXACT_REQUESTED=${KERNEL_EXACT_VERSION:-}"
+        echo "KERNEL_SOURCE_URL=$origin"
+        echo "KERNEL_SOURCE_REPO=$repo_label"
+        echo "KERNEL_SOURCE_BRANCH=$KERNEL_BRANCH"
+        echo "KERNEL_TAG=$tag"
+    } >> "$GITHUB_ENV"
+    log "Kernel source: $origin, branch $KERNEL_BRANCH, commit ${sha:0:12}${tag:+, tag $tag}, Linux $LINUX_VERSION"
+    {
+        echo "### Kernel source"
+        echo "The kernel is fetched from an external repository. It is not part of this repository."
+        echo
+        echo "| | |"
+        echo "|---|---|"
+        echo "| This repository (workflow) | ${GITHUB_REPOSITORY:-unknown} @ \`${GITHUB_SHA:0:12}\` |"
+        echo "| Kernel source repository | [$origin]($origin) ($KERNEL_REPO_ORIGIN) |"
+        echo "| Kernel source branch | \`$KERNEL_BRANCH\` ($KERNEL_BRANCH_ORIGIN) |"
+        echo "| Resolved commit | [\`$sha\`]($link) |"
+        echo "| Tag | ${tag:-none} |"
+        echo "| Kernel base | $KERNEL_VERSION |"
+        echo "| Requested exact version | ${KERNEL_EXACT_VERSION:-none (branch default)} |"
+        echo "| Linux version | $LINUX_VERSION |"
+        if [ -n "$subs" ]; then
+            echo "| Submodules | $(printf '%s' "$subs" | sed 's/ (.*//' | awk '{printf "`%s` %s<br>", substr($1,1,12), $2}') |"
+        fi
+    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
+
+# SUSFS revision actually used (the branch tip unless pinned)
+record_patch_sources() {
+    local sc
+    sc="$(command git -C "$SUSFS_DIR" rev-parse HEAD 2>/dev/null || true)"
+    [ -n "$sc" ] || return 0
+    echo "SUSFS_COMMIT_USED=$sc" >> "$GITHUB_ENV"
+    {
+        echo "### Patch sources"
+        echo "| | |"
+        echo "|---|---|"
+        echo "| susfs4ksu | [\`${sc:0:12}\`](https://gitlab.com/simonpunk/susfs4ksu/-/commit/$sc) (${SUSFS_COMMIT:-branch tip} requested) |"
+    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+}
+
+# Patches that were skipped because they do not apply. Normally only reported; with an exact kernel
+# version they are an error, because a silently missing patch means a silently missing feature.
+report_skipped_patches() {
+    local f="$WORKDIR/skipped-patches.txt"
+    [ -s "$f" ] || return 0
+    cp "$f" "$RELEASE_DIR/skipped-patches.txt"
+    {
+        echo "### Patches that did not apply"
+        sort -u "$f" | sed 's/^/- /'
+    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+    warning "Patches that did not apply: $(sort -u "$f" | tr '\n' ' ')"
+    if [ -n "${KERNEL_EXACT_VERSION:-}" ] && [ "${ALLOW_SKIPPED_PATCHES:-false}" != "true" ]; then
+        error "Linux $KERNEL_EXACT_VERSION was requested and the patches above do not apply to it. Pin SUSFS with SUSFS_COMMIT, pick another version, or set the ALLOW_SKIPPED_PATCHES variable to true to build without them."
+        exit 1
+    fi
+}
+
+# ---------------------------------------------------------------------------------------------------------
+# Kernel source configuration (repository and branch), independent of the repository running the workflow
+# ---------------------------------------------------------------------------------------------------------
+
+# Accept https://host/path or owner/repo (GitHub shorthand); anything else is refused
+normalize_kernel_repo() {
+    local r="${1%/}"
+    case "$r" in
+        https://*) printf '%s\n' "$r" ;;
+        */*)       case "$r" in *:*|*" "*) return 1 ;; esac; printf 'https://github.com/%s\n' "$r" ;;
+        *)         return 1 ;;
+    esac
+}
+
+# Where the kernel comes from, and why. Most specific first:
+#   1. KERNEL_REPO_<base> / KERNEL_BRANCH_<base>   any base, written like 6_1, 5_10, 6_12
+#   2. 6.1 only: KERNEL_REPO, and KERNEL_BRANCH (or KERNEL_BRANCH_NH for NetHunter builds)
+#   3. built-in defaults: the device source for 6.1, the Android Common Kernel -lts branches for the other lines
+# Sets KERNEL_REPO, KERNEL_BRANCH, KERNEL_KMI and, for the build summary, where each value came from.
+resolve_kernel_source_config() {
+    local key="${KERNEL_VERSION//./_}" repo="" branch="" kmi="" repo_src="" branch_src="" v
+    local def_repo_61="https://github.com/ahmed-alnassif/GKI-Duchamp-6.1"
+
+    if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
+        repo="$def_repo_61"; repo_src="built-in default (device source for 6.1)"
+        if [ -n "${KERNEL_REPO:-}" ] && [ "${KERNEL_REPO%/}" != "$def_repo_61" ]; then
+            repo="$KERNEL_REPO"; repo_src="variable KERNEL_REPO"
+        fi
+        if [ "${NH:-false}" = "true" ]; then
+            branch="GKID-NH"; branch_src="built-in default (NetHunter build)"
+            if [ -n "${KERNEL_BRANCH_NH:-}" ]; then branch="$KERNEL_BRANCH_NH"; branch_src="variable KERNEL_BRANCH_NH"; fi
+        else
+            branch="GKID-6.1"; branch_src="built-in default"
+            if [ -n "${KERNEL_BRANCH:-}" ]; then branch="$KERNEL_BRANCH"; branch_src="variable KERNEL_BRANCH"; fi
+        fi
+    else
+        IFS='|' read -r repo branch kmi <<< "$(resolve_kernel_source "$KERNEL_VERSION")"
+        [ -n "$repo" ] && [ -n "$branch" ] || { error "No kernel source is defined for base $KERNEL_VERSION"; exit 1; }
+        repo_src="built-in default (Android Common Kernel)"; branch_src="built-in default"
+    fi
+
+    if ! kernel_version_eq "$KERNEL_VERSION" "6.1" && { [ -n "${KERNEL_REPO:-}" ] || [ -n "${KERNEL_BRANCH:-}" ]; }; then
+        warning "KERNEL_REPO and KERNEL_BRANCH only apply to the 6.1 base; use KERNEL_REPO_${key} and KERNEL_BRANCH_${key} for $KERNEL_VERSION"
+    fi
+    v="KERNEL_REPO_$key";   if [ -n "${!v:-}" ]; then repo="${!v}";   repo_src="variable $v";   fi
+    v="KERNEL_BRANCH_$key"; if [ -n "${!v:-}" ]; then branch="${!v}"; branch_src="variable $v"; fi
+
+    local raw="$repo"
+    repo="$(normalize_kernel_repo "$raw")" \
+        || { error "Kernel source '$raw' (${repo_src}) must be an https:// URL or owner/repo"; exit 1; }
+    [[ "$branch" =~ ^[A-Za-z0-9._/+-]+$ ]] \
+        || { error "Kernel branch '$branch' (${branch_src}) contains characters that are not allowed"; exit 1; }
+
+    KERNEL_REPO="$repo"; KERNEL_BRANCH="$branch"; KERNEL_KMI="$kmi"
+    KERNEL_REPO_ORIGIN="$repo_src"; KERNEL_BRANCH_ORIGIN="$branch_src"
+    log "Kernel source: $KERNEL_REPO ($repo_src), branch $KERNEL_BRANCH ($branch_src)"
+}

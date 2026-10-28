@@ -142,7 +142,7 @@ susfs_included() {
 
 simplify_gh_url() {
   local URL="$1"
-  echo "$URL" | sed "s|https://github.com/||g" | sed "s|.git||g"
+  echo "$URL" | sed -E 's|^https?://github\.com/||; s|\.git$||; s|/$||'
 }
 
 config() {
@@ -232,9 +232,11 @@ generate_gh_changelog() {
 apply_patch_file() {
     local patch="$1"
     local patch_data=""
+    local pname="patch from stdin or data"
 
     if [[ -n "$patch" && -f "$patch" ]]; then
         patch_data=$(cat "$patch")
+        pname="$(basename "$patch")"
         info "Applying: $(basename "$patch")"
     elif [[ -n "$patch" ]]; then
         patch_data="$patch"
@@ -261,6 +263,7 @@ apply_patch_file() {
             return 0
         fi
         error "Failed to apply patch"
+        echo "$pname" >> "${WORKDIR:-.}/skipped-patches.txt"
         return 1
     fi
 
@@ -270,6 +273,7 @@ apply_patch_file() {
     fi
 
     warning "Skipping: patch does not apply in either direction"
+    echo "$pname" >> "${WORKDIR:-.}/skipped-patches.txt"
     return 1
 }
 

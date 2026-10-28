@@ -43,6 +43,11 @@ on:
           - "6.6"
           - "6.12"
 
+      KERNEL_EXACT_VERSION:
+        description: "Exact Linux version inside the selected kernel line, e.g. 6.1.180. Empty = branch default"
+        default: ""
+        type: string
+
       BUILD_VANILLA:
         description: "Build Vanilla (no KSU)"
         type: boolean
@@ -170,6 +175,7 @@ jobs:
         id: set-matrix
         env:
           KERNEL_VERSION: ${{ github.event.inputs.KERNEL_VERSION }}
+          KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
           BUILD_VANILLA: ${{ github.event.inputs.BUILD_VANILLA }}
           BUILD_KSU: ${{ github.event.inputs.BUILD_KSU }}
           BUILD_KSU_SUSFS: ${{ github.event.inputs.BUILD_KSU_SUSFS }}
@@ -213,10 +219,24 @@ jobs:
       - name: Run Build Script
         env:
           GH_TOKEN: ${{ github.token }}
-          KERNEL_REPO: ${{ vars.KERNEL_REPO || 'https://github.com/ahmed-alnassif/GKI-Duchamp-6.1' }}
+          KERNEL_REPO: ${{ vars.KERNEL_REPO }}
+          KERNEL_BRANCH: ${{ vars.KERNEL_BRANCH }}
+          KERNEL_BRANCH_NH: ${{ vars.KERNEL_BRANCH_NH }}
+          KERNEL_REPO_5_10: ${{ vars.KERNEL_REPO_5_10 }}
+          KERNEL_BRANCH_5_10: ${{ vars.KERNEL_BRANCH_5_10 }}
+          KERNEL_REPO_5_15: ${{ vars.KERNEL_REPO_5_15 }}
+          KERNEL_BRANCH_5_15: ${{ vars.KERNEL_BRANCH_5_15 }}
+          KERNEL_REPO_6_1: ${{ vars.KERNEL_REPO_6_1 }}
+          KERNEL_BRANCH_6_1: ${{ vars.KERNEL_BRANCH_6_1 }}
+          KERNEL_REPO_6_6: ${{ vars.KERNEL_REPO_6_6 }}
+          KERNEL_BRANCH_6_6: ${{ vars.KERNEL_BRANCH_6_6 }}
+          KERNEL_REPO_6_12: ${{ vars.KERNEL_REPO_6_12 }}
+          KERNEL_BRANCH_6_12: ${{ vars.KERNEL_BRANCH_6_12 }}
           KERNEL_BRAND: ${{ vars.KERNEL_BRAND }}
           ANYKERNEL_REPO: ${{ vars.ANYKERNEL_REPO }}
           KERNEL_VERSION: ${{ matrix.kernel_version }}
+          KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
+          ALLOW_SKIPPED_PATCHES: ${{ vars.ALLOW_SKIPPED_PATCHES }}
           KSU: ${{ matrix.KSU }}
           KSU_COMPAT: ${{ matrix.KSU_COMPAT }}
           KSU_SUSFS: ${{ matrix.KSU_SUSFS }}
@@ -318,6 +338,11 @@ jobs:
           ANDROID_RELEASE=${{ env.ANDROID_RELEASE }}
           KERNEL_SOURCE_REPO=${{ env.KERNEL_SOURCE_REPO }}
           KERNEL_SOURCE_BRANCH=${{ env.KERNEL_SOURCE_BRANCH }}
+          KERNEL_COMMIT=${{ env.KERNEL_COMMIT }}
+          KERNEL_SOURCE_URL=${{ env.KERNEL_SOURCE_URL }}
+          KERNEL_TAG=${{ env.KERNEL_TAG }}
+          KERNEL_EXACT_REQUESTED=${{ env.KERNEL_EXACT_REQUESTED }}
+          SUSFS_COMMIT_USED=${{ env.SUSFS_COMMIT_USED }}
           EOF
 
           echo "BUILD_VARIANT=${{ matrix.name }}" >> build-env-${{ matrix.name }}.txt
