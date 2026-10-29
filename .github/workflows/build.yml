@@ -5,9 +5,13 @@ permissions:
 
 on:
   workflow_dispatch:
+    # The form lists inputs in the order written here. Labels carry a group tag so the long list scans
+    # at a glance: [Run] [Kernel] [Variant] [Feature] [zram]. Keys are unchanged, so existing
+    # `gh workflow run -f KEY=value` calls and the README keep working.
     inputs:
+      # ---- Run ---------------------------------------------------------------------------------------
       TODO:
-        description: To do
+        description: "[Run] Output: kernel zips, or only the defconfig"
         default: "kernel"
         type: choice
         options:
@@ -15,127 +19,155 @@ on:
           - "defconfig"
 
       TEST:
-        description: debug the pipeline
+        description: "[Run] Dry run: skip the compile, make placeholder zips"
         default: "no"
         type: choice
         options:
           - "no"
           - "yes"
 
-      LTO:
-        description: enable LTO optimization
-        default: "fullLTO"
-        type: choice
-        options:
-          - "noneLTO"
-          - "thinLTO"
-          - "fullLTO"
+      CLEAN_LTO_CACHE:
+        description: "[Run] Clean the ThinLTO cache (fixes the .config bug)"
+        type: boolean
+        default: true
 
+      # ---- Kernel ------------------------------------------------------------------------------------
       KERNEL_VERSION:
-        description: "GKI LTS kernel line to build"
+        description: "[Kernel] GKI LTS line"
         default: "6.1"
         type: choice
         options:
-          - "All"
+          - "6.1"
           - "5.10"
           - "5.15"
-          - "6.1"
           - "6.6"
           - "6.12"
+          - "All"
 
-      KERNEL_EXACT_VERSION:
-        description: "Exact Linux version inside the selected kernel line, e.g. 6.1.180. Empty = branch default"
+      KERNEL_SOURCE:
+        description: "[Kernel] Source id from sources.json (empty = default)"
         default: ""
         type: string
 
+      KERNEL_EXACT_VERSION:
+        description: "[Kernel] Exact version or commit (empty = latest)"
+        default: ""
+        type: string
+
+      ALLOW_UNVERIFIED:
+        description: "[Kernel] Allow a source not verified for the device"
+        type: boolean
+        default: false
+
+      LTO:
+        description: "[Kernel] LTO mode"
+        default: "fullLTO"
+        type: choice
+        options:
+          - "fullLTO"
+          - "thinLTO"
+          - "noneLTO"
+
+      # ---- Variants ----------------------------------------------------------------------------------
       BUILD_VANILLA:
-        description: "Build Vanilla (no KSU)"
+        description: "[Variant] Vanilla (no root)"
         type: boolean
         default: true
 
       BUILD_KSU:
-        description: "Build with KernelSU"
+        description: "[Variant] KernelSU"
         type: boolean
         default: true
 
       BUILD_KSU_SUSFS:
-        description: "Build with KernelSU and its forks + SUSFS"
+        description: "[Variant] KernelSU + BakaSU with SUSFS"
         type: boolean
         default: true
-
-      CLEAN_LTO_CACHE:
-        description: "Clean ThinLTO cache to fix .config bug"
-        type: boolean
-        default: true
-
-      DROIDSPACES:
-        description: "Enable droidspaces-oss support"
-        type: boolean
-        default: true
-
-      NH:
-        description: "Enable NetHunter support"
-        type: boolean
-        default: true
-
-      NM:
-        description: "Enable NoMount support"
-        type: boolean
-        default: false
 
       BUILD_KSUN_SUSFS:
-        description: "Build KernelSU-Next + SUSFS"
-        type: boolean
-        default: false
-
-      BUILD_FINA_SUSFS:
-        description: "Build FinaSU + SUSFS"
+        description: "[Variant] KernelSU-Next + SUSFS"
         type: boolean
         default: false
 
       BUILD_SKSU_SUSFS:
-        description: "Build SukiSU (builtin branch) + SUSFS"
+        description: "[Variant] SukiSU + SUSFS"
+        type: boolean
+        default: false
+
+      BUILD_FINA_SUSFS:
+        description: "[Variant] FinaSU + SUSFS"
         type: boolean
         default: false
 
       BUILD_KOWSU:
-        description: "Build KowSU (SUSFS is not supported by this fork)"
+        description: "[Variant] KowSU (this fork has no SUSFS)"
         type: boolean
         default: false
 
       BUILD_RKSU_SUSFS:
-        description: "Build RKSU + SUSFS (configure RKSU_REPO/RKSU_REF repository variables)"
+        description: "[Variant] RKSU + SUSFS (needs RKSU_REPO variable)"
         type: boolean
         default: false
 
       BUILD_MAMBO_SUSFS:
-        description: "Build MamboSU + SUSFS (configure MAMBOSU_REPO/MAMBOSU_REF repository variables)"
+        description: "[Variant] MamboSU + SUSFS (needs MAMBOSU_REPO variable)"
         type: boolean
         default: false
 
       MM:
-        description: "Try multi-manager signatures on BakaSU / KSU-Next (falls back to the fork's own support)"
+        description: "[Variant] Multi-manager signatures (BakaSU, KSU-Next)"
         type: boolean
         default: true
 
-      ZSTD:
-        description: "zram: LZ4 + ZSTD"
+      # ---- Features ----------------------------------------------------------------------------------
+      DROIDSPACES:
+        description: "[Feature] DroidSpaces"
         type: boolean
-        default: false
+        default: true
 
-      LZ4KD:
-        description: "zram LZ4KD (LZ4 upgrade + NEON, patches from SukiSU_patch)"
+      NH:
+        description: "[Feature] NetHunter"
+        type: boolean
+        default: true
+
+      NM:
+        description: "[Feature] NoMount"
         type: boolean
         default: false
 
       REKERNEL:
-        description: "Re:Kernel (built in from Sakion-Team/Re-Kernel)"
+        description: "[Feature] Re:Kernel"
+        type: boolean
+        default: false
+
+      ZSTD:
+        description: "[zram] LZ4 + ZSTD"
+        type: boolean
+        default: false
+
+      LZ4KD:
+        description: "[zram] LZ4KD (LZ4 upgrade + NEON)"
         type: boolean
         default: false
 
 env:
   MAN_DISABLE: true
   DEBIAN_FRONTEND: noninteractive
+  # Repository variables that replace the kernel source of sources.json. Workflow level, so the first job (source
+  # gate) and every build job see the same values.
+  KERNEL_REPO: ${{ vars.KERNEL_REPO }}
+  KERNEL_BRANCH: ${{ vars.KERNEL_BRANCH }}
+  KERNEL_BRANCH_NH: ${{ vars.KERNEL_BRANCH_NH }}
+  KERNEL_REPO_5_10: ${{ vars.KERNEL_REPO_5_10 }}
+  KERNEL_BRANCH_5_10: ${{ vars.KERNEL_BRANCH_5_10 }}
+  KERNEL_REPO_5_15: ${{ vars.KERNEL_REPO_5_15 }}
+  KERNEL_BRANCH_5_15: ${{ vars.KERNEL_BRANCH_5_15 }}
+  KERNEL_REPO_6_1: ${{ vars.KERNEL_REPO_6_1 }}
+  KERNEL_BRANCH_6_1: ${{ vars.KERNEL_BRANCH_6_1 }}
+  KERNEL_REPO_6_6: ${{ vars.KERNEL_REPO_6_6 }}
+  KERNEL_BRANCH_6_6: ${{ vars.KERNEL_BRANCH_6_6 }}
+  KERNEL_REPO_6_12: ${{ vars.KERNEL_REPO_6_12 }}
+  KERNEL_BRANCH_6_12: ${{ vars.KERNEL_BRANCH_6_12 }}
 
 jobs:
   ensure-cache-release:
@@ -171,9 +203,58 @@ jobs:
         with:
           fetch-depth: 1
 
+      - name: Validate inputs and select sources
+        id: gate
+        env:
+          KERNEL_VERSION: ${{ github.event.inputs.KERNEL_VERSION }}
+          KERNEL_SOURCE: ${{ github.event.inputs.KERNEL_SOURCE }}
+          KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
+          ALLOW_UNVERIFIED: ${{ github.event.inputs.ALLOW_UNVERIFIED }}
+          HYPERCORE_DEVICE: ${{ vars.HYPERCORE_DEVICE }}
+          NH: ${{ github.event.inputs.NH }}
+          BUILD_RKSU_SUSFS: ${{ github.event.inputs.BUILD_RKSU_SUSFS }}
+          BUILD_MAMBO_SUSFS: ${{ github.event.inputs.BUILD_MAMBO_SUSFS }}
+          RKSU_REPO: ${{ vars.RKSU_REPO }}
+          MAMBOSU_REPO: ${{ vars.MAMBOSU_REPO }}
+        run: |
+          # Fail here, once, instead of in every build job after the kernel has been cloned
+          set -euo pipefail
+          python3 py/sources.py validate
+          python3 py/kernelver.py "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION" --gha
+          if [ "$BUILD_RKSU_SUSFS" = "true" ] && [ -z "$RKSU_REPO" ]; then
+            echo "::error::RKSU is selected but the RKSU_REPO repository variable is empty. Set it to owner/repository."
+            exit 1
+          fi
+          if [ "$BUILD_MAMBO_SUSFS" = "true" ] && [ -z "$MAMBOSU_REPO" ]; then
+            echo "::error::MamboSU is selected but the MAMBOSU_REPO repository variable is empty. Set it to owner/repository."
+            exit 1
+          fi
+
+          # Which kernel lines may be built for this device, and with which source. Blocks unsupported sources and
+          # explicit unverified ones before any build job starts.
+          source ./functions.sh
+          source ./functions-extra.sh
+          custom="$(overridden_lines)"
+          lines="$(python3 py/sources.py gate --kernel-version "$KERNEL_VERSION" --source "$KERNEL_SOURCE" \
+            ${HYPERCORE_DEVICE:+--device "$HYPERCORE_DEVICE"} --allow-unverified "$ALLOW_UNVERIFIED" \
+            --custom-lines "$custom" --gha)"
+          echo "lines=$lines" >> "$GITHUB_OUTPUT"
+
+          # A pinned version or commit must exist in the selected source. Checked once here with a commit-only clone,
+          # instead of in every build job after the full clone.
+          if [ -n "$KERNEL_EXACT_VERSION" ]; then
+            if ! out="$(preflight_pin 2>&1)"; then
+              echo "::error::$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ')"
+              exit 1
+            fi
+            printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g'
+          fi
+
       - name: Generate build matrix
         id: set-matrix
         env:
+          ALLOWED_LINES: ${{ steps.gate.outputs.lines }}
+          DROIDSPACES: ${{ github.event.inputs.DROIDSPACES }}
           KERNEL_VERSION: ${{ github.event.inputs.KERNEL_VERSION }}
           KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
           BUILD_VANILLA: ${{ github.event.inputs.BUILD_VANILLA }}
@@ -189,7 +270,8 @@ jobs:
           python3 py/generate-matrix.py >> "$GITHUB_OUTPUT"
 
   build:
-    needs: prepare
+    needs: [prepare, ensure-cache-release]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -219,23 +301,13 @@ jobs:
       - name: Run Build Script
         env:
           GH_TOKEN: ${{ github.token }}
-          KERNEL_REPO: ${{ vars.KERNEL_REPO }}
-          KERNEL_BRANCH: ${{ vars.KERNEL_BRANCH }}
-          KERNEL_BRANCH_NH: ${{ vars.KERNEL_BRANCH_NH }}
-          KERNEL_REPO_5_10: ${{ vars.KERNEL_REPO_5_10 }}
-          KERNEL_BRANCH_5_10: ${{ vars.KERNEL_BRANCH_5_10 }}
-          KERNEL_REPO_5_15: ${{ vars.KERNEL_REPO_5_15 }}
-          KERNEL_BRANCH_5_15: ${{ vars.KERNEL_BRANCH_5_15 }}
-          KERNEL_REPO_6_1: ${{ vars.KERNEL_REPO_6_1 }}
-          KERNEL_BRANCH_6_1: ${{ vars.KERNEL_BRANCH_6_1 }}
-          KERNEL_REPO_6_6: ${{ vars.KERNEL_REPO_6_6 }}
-          KERNEL_BRANCH_6_6: ${{ vars.KERNEL_BRANCH_6_6 }}
-          KERNEL_REPO_6_12: ${{ vars.KERNEL_REPO_6_12 }}
-          KERNEL_BRANCH_6_12: ${{ vars.KERNEL_BRANCH_6_12 }}
           KERNEL_BRAND: ${{ vars.KERNEL_BRAND }}
           ANYKERNEL_REPO: ${{ vars.ANYKERNEL_REPO }}
           KERNEL_VERSION: ${{ matrix.kernel_version }}
+          KERNEL_SOURCE: ${{ github.event.inputs.KERNEL_SOURCE }}
           KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
+          ALLOW_UNVERIFIED: ${{ github.event.inputs.ALLOW_UNVERIFIED }}
+          HYPERCORE_DEVICE: ${{ vars.HYPERCORE_DEVICE }}
           ALLOW_SKIPPED_PATCHES: ${{ vars.ALLOW_SKIPPED_PATCHES }}
           KSU: ${{ matrix.KSU }}
           KSU_COMPAT: ${{ matrix.KSU_COMPAT }}
@@ -376,7 +448,7 @@ jobs:
 
   upload-all:
     needs: build
-    if: always()
+    if: ${{ always() && needs.build.result != 'skipped' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -396,7 +468,7 @@ jobs:
 
   release:
     needs: build
-    if: always() && github.event.inputs.TODO != 'defconfig'
+    if: ${{ always() && needs.build.result != 'skipped' && github.event.inputs.TODO != 'defconfig' }}
     runs-on: ubuntu-latest
     env:
       TG_BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
@@ -413,17 +485,19 @@ jobs:
           merge-multiple: true
 
       - name: Generate Checksums
+        id: sums
         run: |
           cd release-artifacts
           shopt -s nullglob
           zips=( *.zip )
           if (( ${#zips[@]} == 0 )); then
-            echo "::warning::No ZIP artifacts were produced; writing empty checksum files."
-            : > checksums.txt
-            : > checksums-md5.txt
+            # GitHub rejects empty release assets, so there is nothing to publish
+            echo "::warning::No ZIP artifacts were produced, so no release will be created. Check the failed build jobs."
+            echo "has_zips=false" >> "$GITHUB_OUTPUT"
           else
             sha256sum "${zips[@]}" > checksums.txt
             md5sum "${zips[@]}" > checksums-md5.txt
+            echo "has_zips=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Load environment from builds and prepare release body
@@ -436,6 +510,7 @@ jobs:
         run: python3 .github/scripts/prepare_release.py
 
       - name: Upload All Builds to release repo
+        if: steps.sums.outputs.has_zips == 'true'
         uses: softprops/action-gh-release@v3.0.2
         with:
           name: ${{ env.RELEASE_NAME }}
@@ -455,7 +530,7 @@ jobs:
           TOPIC_ID: ${{ secrets.TOPIC_ID }}
           BUILD_RESULT: ${{ needs.build.result }}
           RELEASE_NAME: ${{ env.RELEASE_NAME }}
-          RELEASE_URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.RELEASE }}
+          RELEASE_URL: ${{ steps.sums.outputs.has_zips == 'true' && format('{0}/{1}/releases/tag/{2}', github.server_url, github.repository, env.RELEASE) || '' }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           COMMIT_URL: ${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}
           RUN_NUMBER: ${{ github.run_number }}

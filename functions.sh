@@ -1,67 +1,48 @@
 #!/usr/bin/env bash
 
-declare -A ANDROID_RELEASE_FOR_KVER=(
-  ["5.10"]="12"
-  ["5.15"]="13"
-  ["6.1"]="14"
-  ["6.6"]="15"
-  ["6.12"]="16"
-)
+# Kernel lines, their Android release, KMI branch, SUSFS branch and default source now live in sources.json
+# (schema and procedure for adding a source: SOURCES.md). The functions below only read it, through py/sources.py.
+SOURCES_REGISTRY="${SOURCES_REGISTRY:-${WORKDIR:-.}/sources.json}"
+SOURCES_PY="${SOURCES_PY:-${WORKDIR:-.}/py/sources.py}"
 
-declare -A GKI_BRANCH=(
-  ["5.10"]="android12-5.10"
-  ["5.15"]="android13-5.15"
-  ["6.6"]="android15-6.6"
-  ["6.12"]="android16-6.12"
-)
-
-declare -A GKI_AOSP_BRANCH=(
-  ["5.10"]="android12-5.10-lts"
-  ["5.15"]="android13-5.15-lts"
-  ["6.6"]="android15-6.6-lts"
-  ["6.12"]="android16-6.12-lts"
-)
-
-declare -A GKI_SUSFS_BRANCH=(
-  ["5.10"]="gki-android12-5.10"
-  ["5.15"]="gki-android13-5.15"
-  ["6.1"]="gki-android14-6.1"
-  ["6.6"]="gki-android15-6.6"
-  ["6.12"]="gki-android16-6.12"
-)
-
+# Pinned SUSFS commit per kernel line, optional. Not part of the source registry.
 declare -A GKI_SUSFS_COMMIT=(
 #  ["6.1"]="153f88df3be2501d2d33364f8fe05247aecb3cef"
 #  ["6.6"]="3f0b811b2e105afd8dc858cd71389090e01f404b"
 #  ["6.12"]="fb58aef70a9c2aca8f0f85fba14017af94c4e789"
 )
 
-android_release_for_version() {
-  echo "${ANDROID_RELEASE_FOR_KVER[$1]:-unknown}"
+registry() {
+  python3 "$SOURCES_PY" --registry "$SOURCES_REGISTRY" "$@"
 }
 
+# Fail early, with one line per problem, when sources.json is broken
+validate_source_registry() {
+  registry validate >/dev/null || { error "sources.json is invalid, see the problems above"; exit 1; }
+}
+
+android_release_for_version() {
+  registry line-field "$1" android_release 2>/dev/null || echo "unknown"
+}
+
+# Built-in default source for a kernel line: repo|branch|kmi|source_id|repo_label|branch_label|variant_flag
+# Active feature flags (for example NH=true) pick the matching branch variant of the source.
+# KERNEL_SOURCE (a source id) selects a source other than the default of the line.
 resolve_kernel_source() {
-  local ver="$1"
-  local branch="${GKI_AOSP_BRANCH[$ver]:-}"
-  local kmi="${GKI_BRANCH[$ver]:-}"
+  local ver="$1" out
+  local -a flags=()
+  [ "${NH:-false}" = "true" ] && flags+=(--flag "NH=true")
+  # KERNEL_SOURCE picks a registry source by id. Empty or "default" keeps the line's default source.
+  [ -n "${KERNEL_SOURCE:-}" ] && flags+=(--source "$KERNEL_SOURCE")
 
-  if [ -z "$branch" ]; then
-    error "No AOSP GKI branch mapped for KERNEL_VERSION='$ver' (see GKI_AOSP_BRANCH in functions.sh)"
-    exit 1
-  fi
-
-  echo "https://android.googlesource.com/kernel/common|$branch|$kmi"
+  out="$(registry select "$ver" "${flags[@]}")" || { error "No kernel source could be selected for KERNEL_VERSION='$ver'"; exit 1; }
+  echo "$out"
 }
 
 resolve_susfs_branch() {
-  local ver="$1"
-  local branch="${GKI_SUSFS_BRANCH[$ver]:-}"
+  local ver="$1" branch
 
-  if [ -z "$branch" ]; then
-    error "No susfs4ksu branch mapped for KERNEL_VERSION='$ver'"
-    exit 1
-  fi
-
+  branch="$(registry line-field "$ver" susfs_branch)" || { error "No susfs4ksu branch mapped for KERNEL_VERSION='$ver'"; exit 1; }
   echo "$branch"
 }
 

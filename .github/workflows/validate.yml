@@ -11,7 +11,7 @@ on:
 
 jobs:
   validate:
-    name: Validate workflows, shell scripts, and Python syntax
+    name: Validate workflows, scripts, source registry and tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -33,3 +33,15 @@ jobs:
 
       - name: Validate Python syntax
         run: python3 .github/scripts/validate_python.py
+
+      - name: Validate referenced helper scripts exist
+        run: python3 .github/scripts/validate_references.py
+
+      - name: Validate workflow job graph, inputs and outputs
+        run: python3 .github/scripts/validate_workflow_graph.py
+
+      - name: Validate the kernel source registry
+        run: python3 py/sources.py validate
+
+      - name: Run the tests (registry, gate, pins, workflow, backward compatibility)
+        run: bash tests/run_all.sh

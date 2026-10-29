@@ -335,9 +335,11 @@ clone_kernel_source() {
     git clone -q --filter=tree:0 --no-checkout --single-branch "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
     local res sha
     res="$(python3 "$WORKDIR/py/resolve_kernel_commit.py" "$KSRC" "refs/remotes/origin/$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION")" \
-        || { error "Could not find Linux $KERNEL_EXACT_VERSION on $KERNEL_BRANCH"; exit 1; }
+        || { error "Could not resolve '$KERNEL_EXACT_VERSION' on $KERNEL_BRANCH, see the problem above"; exit 1; }
     sha="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
-    log "Linux $KERNEL_EXACT_VERSION is commit $sha"
+    # For a commit pin, the Linux version is whatever that commit's Makefile reports
+    KERNEL_PIN_EXPECTED_VERSION="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+    log "$KERNEL_EXACT_VERSION is commit $sha (Linux $KERNEL_PIN_EXPECTED_VERSION)"
     command git -C "$KSRC" checkout -q --detach "$sha"
     if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
         command git -C "$KSRC" submodule update --init --recursive --depth 1 -q \
@@ -348,8 +350,9 @@ clone_kernel_source() {
 # The checked-out tree must report exactly the version that was asked for
 verify_exact_kernel_version() {
     [ -n "${KERNEL_EXACT_VERSION:-}" ] || return 0
-    if [ "${LINUX_VERSION%%[!0-9.]*}" != "$KERNEL_EXACT_VERSION" ]; then
-        error "Requested Linux $KERNEL_EXACT_VERSION but the source reports $LINUX_VERSION"
+    local expected="${KERNEL_PIN_EXPECTED_VERSION:-$KERNEL_EXACT_VERSION}"
+    if [ "${LINUX_VERSION%%[!0-9.]*}" != "$expected" ]; then
+        error "Requested Linux $expected ($KERNEL_EXACT_VERSION) but the source reports $LINUX_VERSION"
         exit 1
     fi
 }
@@ -398,7 +401,9 @@ record_kernel_source() {
         echo "| Resolved commit | [\`$sha\`]($link) |"
         echo "| Tag | ${tag:-none} |"
         echo "| Kernel base | $KERNEL_VERSION |"
-        echo "| Requested exact version | ${KERNEL_EXACT_VERSION:-none (branch default)} |"
+        echo "| Registry source | \`${KERNEL_SOURCE_ID:-unknown}\`$(source_overridden && echo ' (replaced by a repository variable)') |"
+        echo "| Device status | $(source_overridden && echo 'not assessed, the source was replaced by a repository variable' || registry status "$KERNEL_SOURCE_ID" ${HYPERCORE_DEVICE:+"$HYPERCORE_DEVICE"} 2>/dev/null || echo unknown) |"
+        echo "| Requested exact version or commit | ${KERNEL_EXACT_VERSION:-none (branch default)} |"
         echo "| Linux version | $LINUX_VERSION |"
         if [ -n "$subs" ]; then
             echo "| Submodules | $(printf '%s' "$subs" | sed 's/ (.*//' | awk '{printf "`%s` %s<br>", substr($1,1,12), $2}') |"
@@ -454,32 +459,34 @@ normalize_kernel_repo() {
 # Where the kernel comes from, and why. Most specific first:
 #   1. KERNEL_REPO_<base> / KERNEL_BRANCH_<base>   any base, written like 6_1, 5_10, 6_12
 #   2. 6.1 only: KERNEL_REPO, and KERNEL_BRANCH (or KERNEL_BRANCH_NH for NetHunter builds)
-#   3. built-in defaults: the device source for 6.1, the Android Common Kernel -lts branches for the other lines
-# Sets KERNEL_REPO, KERNEL_BRANCH, KERNEL_KMI and, for the build summary, where each value came from.
+#   3. the built-in default of the source registry (sources.json): the device source for 6.1, the Android Common
+#      Kernel -lts branches for the other lines
+# Layers 1 and 2 are the repository variables and win over the registry. "6.1 only" is the registry's
+# legacy_override_line, which keeps the unsuffixed variables working exactly as before.
+# Sets KERNEL_REPO, KERNEL_BRANCH, KERNEL_KMI, KERNEL_SOURCE_ID and, for the build summary, where each value came from.
 resolve_kernel_source_config() {
     local key="${KERNEL_VERSION//./_}" repo="" branch="" kmi="" repo_src="" branch_src="" v
-    local def_repo_61="https://github.com/ahmed-alnassif/GKI-Duchamp-6.1"
+    local def_repo="" def_branch="" source_id="" variant_flag="" legacy_line
 
-    if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
-        repo="$def_repo_61"; repo_src="built-in default (device source for 6.1)"
-        if [ -n "${KERNEL_REPO:-}" ] && [ "${KERNEL_REPO%/}" != "$def_repo_61" ]; then
+    IFS='|' read -r def_repo def_branch kmi source_id repo_src branch_src variant_flag <<< "$(resolve_kernel_source "$KERNEL_VERSION")"
+    [ -n "$def_repo" ] && [ -n "$def_branch" ] || { error "No kernel source is defined for base $KERNEL_VERSION"; exit 1; }
+    repo="$def_repo"; branch="$def_branch"
+    legacy_line="$(registry legacy-override-line)" || { error "sources.json has no legacy_override_line"; exit 1; }
+
+    if kernel_version_eq "$KERNEL_VERSION" "$legacy_line"; then
+        if [ -n "${KERNEL_REPO:-}" ] && [ "${KERNEL_REPO%/}" != "$def_repo" ]; then
             repo="$KERNEL_REPO"; repo_src="variable KERNEL_REPO"
         fi
-        if [ "${NH:-false}" = "true" ]; then
-            branch="GKID-NH"; branch_src="built-in default (NetHunter build)"
-            if [ -n "${KERNEL_BRANCH_NH:-}" ]; then branch="$KERNEL_BRANCH_NH"; branch_src="variable KERNEL_BRANCH_NH"; fi
+        if [ -n "$variant_flag" ]; then
+            v="KERNEL_BRANCH_${variant_flag}"
+            if [ -n "${!v:-}" ]; then branch="${!v}"; branch_src="variable $v"; fi
         else
-            branch="GKID-6.1"; branch_src="built-in default"
             if [ -n "${KERNEL_BRANCH:-}" ]; then branch="$KERNEL_BRANCH"; branch_src="variable KERNEL_BRANCH"; fi
         fi
-    else
-        IFS='|' read -r repo branch kmi <<< "$(resolve_kernel_source "$KERNEL_VERSION")"
-        [ -n "$repo" ] && [ -n "$branch" ] || { error "No kernel source is defined for base $KERNEL_VERSION"; exit 1; }
-        repo_src="built-in default (Android Common Kernel)"; branch_src="built-in default"
     fi
 
-    if ! kernel_version_eq "$KERNEL_VERSION" "6.1" && { [ -n "${KERNEL_REPO:-}" ] || [ -n "${KERNEL_BRANCH:-}" ]; }; then
-        warning "KERNEL_REPO and KERNEL_BRANCH only apply to the 6.1 base; use KERNEL_REPO_${key} and KERNEL_BRANCH_${key} for $KERNEL_VERSION"
+    if ! kernel_version_eq "$KERNEL_VERSION" "$legacy_line" && { [ -n "${KERNEL_REPO:-}" ] || [ -n "${KERNEL_BRANCH:-}" ]; }; then
+        warning "KERNEL_REPO and KERNEL_BRANCH only apply to the ${legacy_line} base; use KERNEL_REPO_${key} and KERNEL_BRANCH_${key} for $KERNEL_VERSION"
     fi
     v="KERNEL_REPO_$key";   if [ -n "${!v:-}" ]; then repo="${!v}";   repo_src="variable $v";   fi
     v="KERNEL_BRANCH_$key"; if [ -n "${!v:-}" ]; then branch="${!v}"; branch_src="variable $v"; fi
@@ -490,7 +497,55 @@ resolve_kernel_source_config() {
     [[ "$branch" =~ ^[A-Za-z0-9._/+-]+$ ]] \
         || { error "Kernel branch '$branch' (${branch_src}) contains characters that are not allowed"; exit 1; }
 
-    KERNEL_REPO="$repo"; KERNEL_BRANCH="$branch"; KERNEL_KMI="$kmi"
+    KERNEL_REPO="$repo"; KERNEL_BRANCH="$branch"; KERNEL_KMI="$kmi"; KERNEL_SOURCE_ID="$source_id"
     KERNEL_REPO_ORIGIN="$repo_src"; KERNEL_BRANCH_ORIGIN="$branch_src"
     log "Kernel source: $KERNEL_REPO ($repo_src), branch $KERNEL_BRANCH ($branch_src)"
+}
+
+# Check, before any build job starts, that a pinned version or commit exists in the given source. It makes the same
+# commit-only (partial) clone as clone_kernel_source and runs the same resolver, but downloads no file contents.
+# Prints the resolved commit on success. On failure the reason goes to stderr and the status is 1.
+preflight_pin_for() {  # preflight_pin_for <repo> <branch> <kernel line> <version or commit>
+    local repo="$1" branch="$2" line="$3" pin="$4" dir res rc
+    dir="$(mktemp -d)"
+    GIT_CLONE_PROTECTION_ACTIVE=false git clone -q --filter=tree:0 --no-checkout --single-branch "$repo" -b "$branch" "$dir" 2>/dev/null \
+        || { rm -rf "$dir"; error "Could not clone branch $branch of $repo to check $pin"; return 1; }
+    res="$(python3 "${WORKDIR:-.}/py/resolve_kernel_commit.py" "$dir" "refs/remotes/origin/$branch" "$line" "$pin")"; rc=$?
+    rm -rf "$dir"
+    [ "$rc" -eq 0 ] || return 1
+    echo "$pin resolves to $(printf '%s' "$res" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["commit"], "(Linux " + r["version"] + ")")')"
+}
+
+# The same check for the kernel source that the current KERNEL_VERSION and variables select
+preflight_pin() {
+    [ -n "${KERNEL_EXACT_VERSION:-}" ] || return 0
+    resolve_kernel_source_config >/dev/null || return 1
+    preflight_pin_for "$KERNEL_REPO" "$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION"
+}
+
+# True when a repository variable replaced the registry's repository or branch (needs resolve_kernel_source_config
+# to have run). The registry's compatibility assessment then no longer describes what will be built.
+source_overridden() {
+    [[ "${KERNEL_REPO_ORIGIN:-}" == variable* || "${KERNEL_BRANCH_ORIGIN:-}" == variable* ]]
+}
+
+# Space-separated kernel lines whose source is currently replaced by repository variables
+overridden_lines() {
+    local line out=()
+    for line in $(registry lines); do
+        ( KERNEL_VERSION="$line"; resolve_kernel_source_config >/dev/null 2>&1; source_overridden ) && out+=("$line")
+    done
+    echo "${out[*]:-}"
+}
+
+# Refuse a kernel source that is unsupported for the target device, or a not-verified one chosen explicitly without
+# ALLOW_UNVERIFIED. The workflow checks this once in its first job; this repeats it so build.sh cannot be run around it.
+# Needs resolve_kernel_source_config to have run.
+enforce_source_gate() {
+    local custom=""
+    source_overridden && custom="$KERNEL_VERSION"
+    registry gate --kernel-version "$KERNEL_VERSION" --source "${KERNEL_SOURCE:-}" \
+        ${HYPERCORE_DEVICE:+--device "$HYPERCORE_DEVICE"} \
+        --allow-unverified "${ALLOW_UNVERIFIED:-false}" --custom-lines "$custom" >/dev/null \
+        || { error "Kernel source $KERNEL_VERSION is not allowed for this device, see the problems above"; exit 1; }
 }
