@@ -10,8 +10,6 @@ TIMEZONE="Asia/Damascus"
 # AnyKernel3 config by Ahmed Al-Nassif (see CREDITS.md); override with a repo variable/env if you have your own
 ANYKERNEL_REPO="${ANYKERNEL_REPO:-https://github.com/ahmed-alnassif/AK3-GKID}"
 
-KERNEL_DEFCONFIG="gki_defconfig"
-
 KERNEL_VERSION="${KERNEL_VERSION:-6.1}"
 
 sudo timedatectl set-timezone "$TIMEZONE" || export TZ="$TIMEZONE"
@@ -44,7 +42,13 @@ if [ "${KSU:-}" = "MAMBO" ] && [ -z "${MAMBOSU_REPO:-}" ]; then
   exit 1
 fi
 
+# sources.json defines the kernel lines and their default sources; stop here, with one line per problem, if it is broken
+validate_source_registry
+
 resolve_kernel_source_config
+enforce_source_gate
+
+KERNEL_DEFCONFIG="$(registry line-field "$KERNEL_VERSION" defconfig)" || exit 1
 
 ANDROID_RELEASE="$(android_release_for_version "$KERNEL_VERSION")"
 echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
@@ -97,13 +101,8 @@ SUSFS_URL="https://gitlab.com/simonpunk/susfs4ksu"
 SUSFS_DIR="$WORKDIR/susfs"
 SUSFS_PATCHES="${SUSFS_DIR}/kernel_patches"
 
-if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
-  SUSFS_BRANCH="gki-android14-6.1"
-  SUSFS_PATCH="gki-android14-6.1"
-else
-  SUSFS_BRANCH="$(resolve_susfs_branch "$KERNEL_VERSION")"
-  SUSFS_PATCH="$SUSFS_BRANCH"
-fi
+SUSFS_BRANCH="$(resolve_susfs_branch "$KERNEL_VERSION")" || exit 1
+SUSFS_PATCH="$SUSFS_BRANCH"
 
 log "Changelog of repos"
 clone_susfs 5

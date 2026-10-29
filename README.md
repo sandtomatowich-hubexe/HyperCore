@@ -198,26 +198,42 @@ Start with one variant when testing changes, then enable the rest. A failure in 
 
 ## Workflow options
 
-| Input | Default | What it does |
-|---|---|---|
-| `KERNEL_VERSION` | `6.1` | Kernel line: `5.10`, `5.15`, `6.1`, `6.6`, `6.12` or `All` |
-| `KERNEL_EXACT_VERSION` | empty | Exact Linux version inside the selected line, for example `6.1.180`. Empty keeps the branch default. See [Exact kernel version](#exact-kernel-version) |
-| `LTO` | `fullLTO` | `noneLTO`, `thinLTO` or `fullLTO`. Full LTO is the slowest and needs the most RAM |
-| `BUILD_VANILLA` | on | Vanilla and Vanilla+NoLTO |
-| `BUILD_KSU` | on | KernelSU without SUSFS |
-| `BUILD_KSU_SUSFS` | on | KernelSU and BakaSU with SUSFS, standard and Compat |
-| `BUILD_KSUN_SUSFS` | off | KernelSU-Next with SUSFS |
-| `BUILD_FINA_SUSFS` | off | FinaSU with SUSFS |
-| `MM` | on | Try the multi-manager signature patch on BakaSU and KernelSU-Next |
-| `ZSTD` | off | zram with LZ4 and ZSTD |
-| `LZ4KD` | off | zram LZ4K, LZ4KD and LZ4K_OPLUS, with an upgraded LZ4 and NEON decompressor |
-| `REKERNEL` | off | Re:Kernel, built in from Sakion-Team/Re-Kernel |
-| `DROIDSPACES` | on | DroidSpaces container support |
-| `NH` | on | NetHunter support |
-| `NM` | off | NoMount |
-| `CLEAN_LTO_CACHE` | on | Clears the ThinLTO cache to avoid a known `.config` bug |
-| `TODO` | `kernel` | `defconfig` exports the generated defconfig instead of building a kernel |
-| `TEST` | `no` | `yes` skips the compile and produces placeholder zips, to test the pipeline |
+The Run workflow form lists the options in groups, and every label starts with its group tag.
+
+| Tag | Input | Default | What it does |
+|---|---|---|---|
+| Run | `TODO` | `kernel` | `defconfig` exports the generated defconfig instead of building a kernel |
+| Run | `TEST` | `no` | `yes` skips the compile and produces placeholder zips, to test the pipeline |
+| Run | `CLEAN_LTO_CACHE` | on | Clears the ThinLTO cache to avoid a known `.config` bug |
+| Kernel | `KERNEL_VERSION` | `6.1` | Kernel line: `6.1`, `5.10`, `5.15`, `6.6`, `6.12` or `All` |
+| Kernel | `KERNEL_SOURCE` | empty | Id of a source in `sources.json`. Empty (or `default`) keeps the default source of the line. See [SOURCES.md](SOURCES.md) |
+| Kernel | `KERNEL_EXACT_VERSION` | empty | Exact Linux version inside the selected line, for example `6.1.180`, or a commit SHA of 7 to 40 hex characters. Empty keeps the branch default. See [Exact kernel version](#exact-kernel-version) |
+| Kernel | `ALLOW_UNVERIFIED` | off | Lets you choose a source that is not verified for the device. Never unlocks an unsupported source |
+| Kernel | `LTO` | `fullLTO` | `fullLTO`, `thinLTO` or `noneLTO`. Full LTO is the slowest and needs the most RAM |
+| Variant | `BUILD_VANILLA` | on | Vanilla and Vanilla+NoLTO |
+| Variant | `BUILD_KSU` | on | KernelSU without SUSFS |
+| Variant | `BUILD_KSU_SUSFS` | on | KernelSU and BakaSU with SUSFS, standard, Compat and NoDS |
+| Variant | `BUILD_KSUN_SUSFS` | off | KernelSU-Next with SUSFS |
+| Variant | `BUILD_SKSU_SUSFS` | off | SukiSU (`builtin` branch) with SUSFS |
+| Variant | `BUILD_FINA_SUSFS` | off | FinaSU with SUSFS |
+| Variant | `BUILD_KOWSU` | off | KowSU. Its integration does not support SUSFS, so it is a standalone variant |
+| Variant | `BUILD_RKSU_SUSFS` | off | RKSU with SUSFS. Needs the `RKSU_REPO` repository variable |
+| Variant | `BUILD_MAMBO_SUSFS` | off | MamboSU with SUSFS. Needs the `MAMBOSU_REPO` repository variable |
+| Variant | `MM` | on | Try the multi-manager signature patch on BakaSU and KernelSU-Next |
+| Feature | `DROIDSPACES` | on | DroidSpaces container support. When off, the NoDS variants are not built, because they would be identical |
+| Feature | `NH` | on | NetHunter support |
+| Feature | `NM` | off | NoMount |
+| Feature | `REKERNEL` | off | Re:Kernel, built in from Sakion-Team/Re-Kernel |
+| zram | `ZSTD` | off | zram with LZ4 and ZSTD |
+| zram | `LZ4KD` | off | zram LZ4K, LZ4KD and LZ4K_OPLUS, with an upgraded LZ4 and NEON decompressor |
+
+Bad combinations are rejected by the first job, before any build job starts: an exact version or source id with `All`, a
+version or commit that is not in the selected source, an exact version from another line, a malformed version, an unknown
+source id, a source that is unsupported for the device, and RKSU or MamboSU selected without their repository variable.
+You get one clear error on the run page instead of one failure per build job.
+
+**`All` means every kernel line that may be built for the device.** Lines that are unsupported for the device are skipped
+with a warning, so with the default registry `All` builds 6.1 only. See the compatibility policy in [SOURCES.md](SOURCES.md).
 
 ## Kernel source
 
@@ -232,12 +248,12 @@ summary says so explicitly.
 | 6.6 | `android.googlesource.com/kernel/common` | `android15-6.6-lts` |
 | 6.12 | `android.googlesource.com/kernel/common` | `android16-6.12-lts` |
 
-The defaults are intentional upstream sources and are not hardcoded into the workflow file. To use your own source, set
+The defaults live in `sources.json` (see [SOURCES.md](SOURCES.md)) and are not hardcoded into the workflow file or the scripts. To use your own source, set
 repository variables. The most specific one wins:
 
 1. `KERNEL_REPO_<base>` and `KERNEL_BRANCH_<base>` for any base, for example `KERNEL_REPO_5_10`.
 2. For 6.1 only: `KERNEL_REPO`, and `KERNEL_BRANCH` (or `KERNEL_BRANCH_NH` for NetHunter builds).
-3. The built-in defaults above.
+3. The source of the registry: the default source of the line, or the one named by the `KERNEL_SOURCE` input.
 
 `KERNEL_REPO` and `KERNEL_BRANCH` without a base suffix apply to 6.1 only. They are ignored, with a warning, for the other
 bases, so a device repository can never be built as the wrong kernel line. A repository is an `https://` URL or
@@ -248,11 +264,19 @@ what was configured. If they differ, the build stops. The job summary then lists
 source repository and where its value came from (built-in default or which variable), the branch, the resolved commit with
 a link, the tag if any, the submodule commits, the kernel base, the requested exact version and the resulting Linux version.
 It works together with [Exact kernel version](#exact-kernel-version): the exact version is searched on the configured
-repository and branch.
+repository and branch. The summary also names the registry source and what is known about it for the device, for example
+`needs-verification for duchamp (build: reported, boot: unverified)`.
+
+**Device compatibility.** The registry records, per source and device, whether it is `confirmed`, `needs-verification` or
+`unsupported`, and records the build and the boot result separately. The default 6.1 source still builds as before, with a
+warning that it is not boot-verified. Sources that are unsupported for the device are blocked before any build job starts.
+Setting a repository variable that replaces a source makes it your own source: it is allowed, with a warning, because the
+registry's assessment no longer describes it. Set the repository variable `HYPERCORE_DEVICE` to target another device that
+is configured in `sources.json`.
 
 ## Exact kernel version
 
-`KERNEL_VERSION` selects the kernel line. `KERNEL_EXACT_VERSION` optionally selects one release inside it.
+`KERNEL_VERSION` selects the kernel line. `KERNEL_EXACT_VERSION` optionally pins one release inside it, as a Linux version or as a commit.
 
 | KERNEL_VERSION | KERNEL_EXACT_VERSION | Result |
 |---|---|---|
@@ -260,12 +284,15 @@ repository and branch.
 | `6.1` | `6.1.180` | The source state that reports Linux 6.1.180 |
 | `5.10` | `5.10.209` | The source state that reports Linux 5.10.209 |
 | `5.10` | `6.1.180` | Rejected before anything is built: 6.1.180 belongs to the 6.1 line |
+| `6.1` | `0123abc` (7 to 40 hex characters) | That commit, if it is on the selected source branch and its Makefile reports a 6.1 version |
 | `All` | `6.1.180` | Rejected: an exact version needs a single kernel line |
 
 **Where the source comes from.** GKI kernels need Android's patches (ABI, vendor hooks), so a plain kernel.org tag would
 not be a GKI kernel. The exact version is therefore searched on the [configured kernel source](#kernel-source): by default the
 device repository for 6.1, and the Android Common Kernel `-lts` branches for 5.10, 5.15, 6.6 and 6.12. Those branches merge every
 upstream stable release, so each release appears in their history.
+
+**Checked before the build.** The first job makes a commit-only clone of the selected source (no file contents) and resolves the pin, so a version or commit that does not exist fails once, in seconds, instead of in every build job. A commit pin must exist, be part of the history of the selected branch, and belong to the selected line. Its Linux version is read from that commit and has to match the checked-out tree.
 
 **How the version is found.** The branch history is fetched without file contents, then a binary search over the
 `VERSION`, `PATCHLEVEL` and `SUBLEVEL` lines of the top-level Makefile finds the last commit that still reports the
@@ -327,12 +354,18 @@ always arrives. If part of the build failed, an extra message tells you so and l
 | `has no branch/tag 'x'` | That branch does not exist on the fork. Set `BSU_REF`, `KSUN_REF`, `KSUN_REPO` or `FINA_REF` |
 | `duplicate symbol: my_...` or `undefined symbol: my_...` while linking BakaSU | The SUSFS hooks are classified from the real source at build time, so this should not happen any more. If it does, send the `BakaSU SUSFS hook check` table from the job summary |
 | `BakaSU blocks this SUSFS revision` | BakaSU's maintainers refuse SUSFS revisions they have not caught up with. Pin `SUSFS_COMMIT` to a revision that works, or pin `BSU_REF` |
+| `... is unsupported for duchamp: ...` | That kernel line has no source that supports the device. See the compatibility table in [SOURCES.md](SOURCES.md) |
+| `Selecting a source that is not verified needs ALLOW_UNVERIFIED=true` | You named a source that nobody has verified for the device. Turn `ALLOW_UNVERIFIED` on if you accept that |
+| `Unknown kernel source '...'. Did you mean ...` | `KERNEL_SOURCE` must be an id listed in `sources.json` for the selected line |
+| `Commit '...' does not exist in the history of ...` | The commit is not on the selected source branch, or the SHA is wrong. The message shows the Linux version of the branch tip |
+| `sources.json: ...` | The registry is invalid. Each message names the exact field. Run `python3 py/sources.py validate` |
 | `X does not exist on ... Nearest versions` | That Linux release is not in the branch history. Use one of the versions named in the message |
 | `belongs to the 6.1 line, but the selected kernel base is 5.10` | The exact version and `KERNEL_VERSION` must be the same line |
 | `patches above do not apply to it` | The exact release is too old or too new for the patch set. Pin `SUSFS_COMMIT`, choose another release, or set `ALLOW_SKIPPED_PATCHES=true` |
 | `does not apply` for a patch | An upstream fork changed. Open the failed job: the message names the patch and the step |
 | `LZ4KD needs ... does not exist` | SukiSU_patch has no zram patches for that kernel line. Turn `LZ4KD` off for that line |
-| `sha256sum: '*.zip': No such file` in the release job | Every build failed, so there is nothing to release. Fix the build errors first |
+| `No ZIP artifacts were produced` warning in the release job | Every build failed, so no release is created. Fix the build errors first |
+| `Can't open file ... py/<name>.py` | A helper script is referenced but missing from the repository. The **Validate** workflow now reports this on every push |
 | Full LTO job is cancelled or runs out of memory | Use `thinLTO` |
 | Pages deploy fails | Set the Pages source to **GitHub Actions** in the repository settings, then re-run **Deploy site** |
 | Telegram step fails | Check that the bot is an admin of the channel and that `CHAT_ID` is correct |
@@ -350,7 +383,9 @@ failing step in the job page shows a one-line error.
 | `configs/` | Kernel config fragments |
 | `kernel-patches/`, `patches/` | Kernel and root-fork patches |
 | `zram/` | Upgraded LZ4 library and NEON decompressor used by the LZ4KD option |
-| `py/` | Build matrix and KMI helpers |
+| `sources.json`, `SOURCES.md` | The kernel source registry and its documentation |
+| `py/` | Build matrix, source registry (`sources.py`), exact-version helpers and KMI helpers |
+| `tests/` | Registry, gate, pin, workflow and backward-compatibility tests (`bash tests/run_all.sh`) |
 | `scripts/finasu/` | FinaSU manager certificate helper |
 | `modules/WirelessKSU/` | Realtek USB Wi-Fi drivers for NetHunter |
 | `site/` | The GitHub Pages site |

@@ -1,0 +1,144 @@
+{
+  "schema_version": 1,
+  "legacy_override_line": "6.1",
+  "default_device": "duchamp",
+
+  "devices": {
+    "duchamp": {
+      "name": "Poco X6 Pro",
+      "soc": "MT6897",
+      "kernel_line": "6.1",
+      "android_release": "14",
+      "references": [
+        "https://github.com/MiCode/MTK_kernel_modules/issues/42",
+        "https://github.com/TheFormidable/android-kernel-rebaser"
+      ]
+    }
+  },
+
+  "lines": {
+    "5.10": {
+      "android_release": "12",
+      "kmi": "android12-5.10",
+      "susfs_branch": "gki-android12-5.10",
+      "defconfig": "gki_defconfig",
+      "toolchain": {"name": "neutron-clang", "notes": "Recorded only. build.sh still downloads Neutron clang itself."}
+    },
+    "5.15": {
+      "android_release": "13",
+      "kmi": "android13-5.15",
+      "susfs_branch": "gki-android13-5.15",
+      "defconfig": "gki_defconfig",
+      "toolchain": {"name": "neutron-clang", "notes": "Recorded only. build.sh still downloads Neutron clang itself."}
+    },
+    "6.1": {
+      "android_release": "14",
+      "kmi": "android14-6.1",
+      "susfs_branch": "gki-android14-6.1",
+      "defconfig": "gki_defconfig",
+      "toolchain": {"name": "neutron-clang", "notes": "Recorded only. build.sh still downloads Neutron clang itself."}
+    },
+    "6.6": {
+      "android_release": "15",
+      "kmi": "android15-6.6",
+      "susfs_branch": "gki-android15-6.6",
+      "defconfig": "gki_defconfig",
+      "toolchain": {"name": "neutron-clang", "notes": "Recorded only. build.sh still downloads Neutron clang itself."}
+    },
+    "6.12": {
+      "android_release": "16",
+      "kmi": "android16-6.12",
+      "susfs_branch": "gki-android16-6.12",
+      "defconfig": "gki_defconfig",
+      "toolchain": {"name": "neutron-clang", "notes": "Recorded only. build.sh still downloads Neutron clang itself."}
+    }
+  },
+
+  "sources": {
+    "gkid-duchamp-6.1": {
+      "line": "6.1",
+      "repo": "https://github.com/ahmed-alnassif/GKI-Duchamp-6.1",
+      "branch": "GKID-6.1",
+      "label": "device source for 6.1",
+      "default_for_line": true,
+      "branch_variants": [
+        {"when_flag": "NH", "branch": "GKID-NH", "label": "NetHunter build"}
+      ],
+      "devices": {
+        "duchamp": {
+          "compatibility": "needs-verification",
+          "build_verification": {
+            "state": "reported",
+            "evidence": "Kernel Builder run #8 (2026-10-28) finished green in 30m14s in the owner's Actions screenshot. Logs were not inspected, so the variant built and the artifacts are unknown."
+          },
+          "boot_verification": {"state": "unverified"},
+          "notes": "The repository describes itself as a 6.1 android14 GKI kernel for duchamp. There is no evidence yet that it boots on the device."
+        }
+      }
+    },
+    "aosp-ack-5.10": {
+      "line": "5.10",
+      "repo": "https://android.googlesource.com/kernel/common",
+      "branch": "android12-5.10-lts",
+      "label": "Android Common Kernel",
+      "default_for_line": true,
+      "devices": {
+        "duchamp": {
+          "compatibility": "unsupported",
+          "basis": "reasoned",
+          "reason": "Generic Android Common Kernel on the 5.10 line. duchamp is a 6.1 (android14) device, so this is not its kernel line. Not tested.",
+          "build_verification": {"state": "unverified"},
+          "boot_verification": {"state": "unverified"}
+        }
+      }
+    },
+    "aosp-ack-5.15": {
+      "line": "5.15",
+      "repo": "https://android.googlesource.com/kernel/common",
+      "branch": "android13-5.15-lts",
+      "label": "Android Common Kernel",
+      "default_for_line": true,
+      "devices": {
+        "duchamp": {
+          "compatibility": "unsupported",
+          "basis": "reasoned",
+          "reason": "Generic Android Common Kernel on the 5.15 line. duchamp is a 6.1 (android14) device, so this is not its kernel line. Not tested.",
+          "build_verification": {"state": "unverified"},
+          "boot_verification": {"state": "unverified"}
+        }
+      }
+    },
+    "aosp-ack-6.6": {
+      "line": "6.6",
+      "repo": "https://android.googlesource.com/kernel/common",
+      "branch": "android15-6.6-lts",
+      "label": "Android Common Kernel",
+      "default_for_line": true,
+      "devices": {
+        "duchamp": {
+          "compatibility": "unsupported",
+          "basis": "reasoned",
+          "reason": "Generic Android Common Kernel on the 6.6 line. duchamp is a 6.1 (android14) device, so this is not its kernel line. Not tested.",
+          "build_verification": {"state": "unverified"},
+          "boot_verification": {"state": "unverified"}
+        }
+      }
+    },
+    "aosp-ack-6.12": {
+      "line": "6.12",
+      "repo": "https://android.googlesource.com/kernel/common",
+      "branch": "android16-6.12-lts",
+      "label": "Android Common Kernel",
+      "default_for_line": true,
+      "devices": {
+        "duchamp": {
+          "compatibility": "unsupported",
+          "basis": "reasoned",
+          "reason": "Generic Android Common Kernel on the 6.12 line. duchamp is a 6.1 (android14) device, so this is not its kernel line. Not tested.",
+          "build_verification": {"state": "unverified"},
+          "boot_verification": {"state": "unverified"}
+        }
+      }
+    }
+  }
+}

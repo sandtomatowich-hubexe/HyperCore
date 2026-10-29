@@ -64,7 +64,14 @@ BUILD_CONFIGS: Dict[str, List[Dict[str, Any]]] = {
 	]
 }
 
-ALL_KERNEL_VERSIONS: List[str] = ["5.10", "5.15", "6.1", "6.6", "6.12"]
+def registry_lines() -> List[str]:
+	"""Kernel lines come from sources.json, so there is no second list to keep in sync."""
+	sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+	import sources
+	return sources.load().lines
+
+
+ALL_KERNEL_VERSIONS: List[str] = registry_lines()
 
 def get_env_bool(var_name: str, default: bool = False) -> bool:
 	"""Read environment variable as boolean."""
@@ -75,9 +82,13 @@ def get_env_bool(var_name: str, default: bool = False) -> bool:
 
 def resolve_kernel_versions() -> List[str]:
 	selected = os.environ.get("KERNEL_VERSION", "All").strip()
+	# The prepare job's source gate lists the lines that may be built for the device. Without it (running this
+	# script by hand) every configured line is used, as before.
+	allowed = os.environ.get("ALLOWED_LINES", "").split()
+	candidates = [v for v in ALL_KERNEL_VERSIONS if v in allowed] if allowed else ALL_KERNEL_VERSIONS
 
 	if not selected or selected.lower() == "all":
-		return ALL_KERNEL_VERSIONS
+		return candidates
 
 	if selected not in ALL_KERNEL_VERSIONS:
 		raise ValueError(
@@ -85,7 +96,11 @@ def resolve_kernel_versions() -> List[str]:
 			f"Expected 'All' or one of: {', '.join(ALL_KERNEL_VERSIONS)}"
 		)
 
+	if allowed and selected not in allowed:
+		raise ValueError(f"KERNEL_VERSION='{selected}' was not allowed by the source gate (allowed: {', '.join(allowed)})")
+
 	return [selected]
+
 
 def generate_matrix() -> Dict[str, List[Dict[str, Any]]]:
 	variant_entries = []
@@ -93,6 +108,12 @@ def generate_matrix() -> Dict[str, List[Dict[str, Any]]]:
 	for env_var, configs in BUILD_CONFIGS.items():
 		if get_env_bool(env_var):
 			variant_entries.extend(configs)
+
+	# The NoDS variants only differ from their twin by having DroidSpaces switched off. With DroidSpaces
+	# already off for the whole run they would be identical builds, so skip them.
+	# (Unset keeps the old behaviour, so running this script by hand still lists everything.)
+	if os.environ.get("DROIDSPACES", "").strip().lower() in ("false", "0", "no", "off"):
+		variant_entries = [v for v in variant_entries if v.get("No_DS") != "true"]
 
 	if not variant_entries:
 		raise ValueError(
