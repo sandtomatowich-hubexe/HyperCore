@@ -3,6 +3,12 @@
 ## 2026-10-29
 
 ### Fixed
+- **KernelSU-Next builds failing with `Committer identity unknown`.** The two `git cherry-pick` calls that apply pershoot's susfs4ksu
+  fixes need a git identity, and a CI runner has none. The build only ever set one inside the plain KernelSU branch, so
+  every KernelSU-Next variant (including Compat) stopped there. This was already in your original code, not caused by the
+  later changes. The build now gives itself an identity through the environment (`ensure_git_identity`), only when git has no
+  identity of its own, and without modifying any git config file. The fixes moved into `apply_pershoot_susfs_fixes`, with the
+  same source and the same two commits, so they can be tested.
 - **All builds failing with `can't open file 'py/kernelver.py'`.** The exact-version path (`KERNEL_EXACT_VERSION`) calls two
   helper scripts that were never committed. Both are now in `py/`:
   - `py/kernelver.py` validates `KERNEL_VERSION` and `KERNEL_EXACT_VERSION`.
@@ -61,11 +67,15 @@
 | 5.10, 5.15, 6.6, 6.12 (Android Common Kernel) | unsupported (reasoned, not tested) | unverified | unverified |
 
 ### Tested here
-- 112 Python tests and 230 shell checks pass, including mutation checks that confirmed the tests fail when a default or the gate is broken.
+- 126 Python tests and 230 shell checks pass, including mutation checks that confirmed the tests fail when a default or the gate is broken.
 - The real prepare-job script was run for 12 input combinations, and the real `clone_kernel_source` against synthetic partial-clone repositories.
 - All repository validators pass, and the patch applies cleanly on the previously delivered state.
 
 ### Not verified here (needs a real run)
+- [ ] A KernelSU-Next build (and its Compat variant) past the point where it used to stop. Only the git identity step was reproduced and fixed here.
+- [ ] Neutron clang: the newest toolchain tag asks for glibc 2.43 and the runner has 2.39. `antman` prints a warning and offers
+      `--patch=glibc`. Clang did run for the `pahole` build, but the kernel compile has not been seen with it. If a compile fails
+      with a `GLIBC_2.43 not found` message, that is the cause.
 - [ ] A real **Kernel Builder** run on GitHub Actions with default inputs.
 - [ ] A run with `KERNEL_EXACT_VERSION` set to a real version of `GKID-6.1`, to confirm the pre-flight against the real remote.
 - [ ] A real duchamp build with its log inspected, then a boot test on the device. Only then can `gkid-duchamp-6.1` become `confirmed`.

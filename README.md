@@ -354,6 +354,7 @@ always arrives. If part of the build failed, an extra message tells you so and l
 | `has no branch/tag 'x'` | That branch does not exist on the fork. Set `BSU_REF`, `KSUN_REF`, `KSUN_REPO` or `FINA_REF` |
 | `duplicate symbol: my_...` or `undefined symbol: my_...` while linking BakaSU | The SUSFS hooks are classified from the real source at build time, so this should not happen any more. If it does, send the `BakaSU SUSFS hook check` table from the job summary |
 | `BakaSU blocks this SUSFS revision` | BakaSU's maintainers refuse SUSFS revisions they have not caught up with. Pin `SUSFS_COMMIT` to a revision that works, or pin `BSU_REF` |
+| `Committer identity unknown` / `empty ident name ... not allowed` while applying patches | A patch step needs to create a git commit and git has no identity. The build now sets one itself (`ensure_git_identity`). If you still see it, the script that failed was run outside `build.sh` |
 | `... is unsupported for duchamp: ...` | That kernel line has no source that supports the device. See the compatibility table in [SOURCES.md](SOURCES.md) |
 | `Selecting a source that is not verified needs ALLOW_UNVERIFIED=true` | You named a source that nobody has verified for the device. Turn `ALLOW_UNVERIFIED` on if you accept that |
 | `Unknown kernel source '...'. Did you mean ...` | `KERNEL_SOURCE` must be an id listed in `sources.json` for the selected line |

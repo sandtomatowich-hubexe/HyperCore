@@ -52,6 +52,35 @@ link_ksu_tree() {
     grep -q 'source "drivers/kernelsu/Kconfig"' "$drv/Kconfig" || sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' "$drv/Kconfig"
 }
 
+# Patching creates commits (git cherry-pick, merge, commit). A CI runner has no git identity, and git then stops with
+# "Committer identity unknown" (or "empty ident name ... not allowed"). This gives the build an identity through the
+# environment, so no git config file is modified, and only when git has no usable identity of its own, so an identity
+# you configured yourself is kept. Safe to call more than once.
+ensure_git_identity() {
+    if ! command git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+        export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gkid-ci}"
+        export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci@localhost}"
+    fi
+    if ! command git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then
+        export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gkid-ci}"
+        export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci@localhost}"
+    fi
+}
+
+# pershoot's two susfs4ksu fixes (they touch only kernel_patches/fs/susfs.c), cherry-picked onto the SUSFS checkout.
+# PERSHOOT_SUSFS_URL and PERSHOOT_SUSFS_COMMITS override the source and the commits (the tests use a local repository).
+apply_pershoot_susfs_fixes() {
+    local url="${PERSHOOT_SUSFS_URL:-https://gitlab.com/pershoot/susfs4ksu.git}" commit
+    local -a commits
+    read -r -a commits <<< "${PERSHOOT_SUSFS_COMMITS:-6387756d64b3ab9ececefc4523627a9ee05a7519 161c058fed5544a6573d87124f346dadd5c4962d}"
+
+    ( cd "$SUSFS_DIR" \
+      && ensure_git_identity \
+      && git fetch -q "$url" "${commits[@]}" \
+      && for commit in "${commits[@]}"; do git cherry-pick "$commit" || exit 1; done ) \
+      || { error "pershoot susfs4ksu fixes failed to apply"; exit 1; }
+}
+
 # KernelSU-Next with SUSFS: pershoot's dev-susfs fork already ships SUSFS (no KernelSU-side patch).
 # Steps follow WildKernels/GKI_KernelSU_SUSFS.
 install_ksun() {
@@ -72,13 +101,7 @@ install_ksun() {
 
     clone_susfs
     if [ "$repo" = "pershoot/KernelSU-Next" ]; then
-        # pershoot's two susfs4ksu fixes (touch only kernel_patches/fs/susfs.c)
-        ( cd "$SUSFS_DIR" \
-          && git fetch -q https://gitlab.com/pershoot/susfs4ksu.git \
-               6387756d64b3ab9ececefc4523627a9ee05a7519 161c058fed5544a6573d87124f346dadd5c4962d \
-          && git cherry-pick 6387756d64b3ab9ececefc4523627a9ee05a7519 \
-          && git cherry-pick 161c058fed5544a6573d87124f346dadd5c4962d ) \
-          || { error "pershoot susfs4ksu fixes failed to apply"; exit 1; }
+        apply_pershoot_susfs_fixes
     fi
     apply_susfs_patches
 }

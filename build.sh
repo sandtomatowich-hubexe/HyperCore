@@ -45,6 +45,9 @@ fi
 # sources.json defines the kernel lines and their default sources; stop here, with one line per problem, if it is broken
 validate_source_registry
 
+# Patch steps create commits. A runner has no git identity, so give the build one before any of them runs.
+ensure_git_identity
+
 resolve_kernel_source_config
 enforce_source_gate
 
