@@ -77,6 +77,46 @@ def display_variant_name(build):
 	return name[len(prefix):] if name.startswith(prefix) else name
 
 
+def commit_link(origin, sha):
+	if "github.com" in origin:
+		return f"{origin.rstrip('/').removesuffix('.git')}/commit/{sha}"
+	return f"{origin.rstrip('/').removesuffix('.git')}/+/{sha}"
+
+
+def kernel_source_lines(build):
+	"""Where the kernel came from and who controls it.
+
+	A source HyperCore manages and the upstream project it tracks are always named separately, an external project is
+	never presented as HyperCore's, and a source replaced by a repository variable is called custom. Builds that did not
+	record the origin say so instead of guessing.
+	"""
+	repo, branch = build.get("KERNEL_SOURCE_REPO", ""), build.get("KERNEL_SOURCE_BRANCH", "")
+	if not repo:
+		return ["- Kernel source: not recorded"]
+	origin = build.get("KERNEL_SOURCE_URL") or f"https://github.com/{repo}"
+	role = build.get("KERNEL_SOURCE_ROLE", "")
+	if build.get("KERNEL_SOURCE_OVERRIDDEN") == "true":
+		label = "Kernel source (custom, set by a repository variable, not assessed)"
+	elif role == "managed":
+		label = "Kernel source (HyperCore-managed)"
+	elif role == "external":
+		label = "Kernel source (upstream project, not managed by HyperCore)"
+	else:
+		label = "Kernel source (origin not recorded)"
+	lines = [f"- {label}: [{repo}]({origin}) @ `{branch}`"]
+
+	up_repo, up_branch = build.get("KERNEL_UPSTREAM_REPO", ""), build.get("KERNEL_UPSTREAM_BRANCH", "")
+	if role == "managed" and up_repo and build.get("KERNEL_SOURCE_OVERRIDDEN") != "true":
+		lines.append(f"- Upstream project: [{up_repo.removeprefix('https://github.com/')}]({up_repo}) @ `{up_branch}`")
+	commit = build.get("KERNEL_COMMIT", "")
+	if commit:
+		lines.append(f"- Kernel commit: [`{commit[:12]}`]({commit_link(origin, commit)})")
+	requested = build.get("KERNEL_EXACT_REQUESTED", "")
+	if requested:
+		lines.append(f"- Requested version: `{requested}`")
+	return lines
+
+
 def build_kernel_section(kernel_version, builds, repo, tag, existing_zips, inputs):
 	android_release = builds[0].get("ANDROID_RELEASE", "unknown")
 	label = f"Android{android_release}-{kernel_version}-LTS"
@@ -106,6 +146,8 @@ def build_kernel_section(kernel_version, builds, repo, tag, existing_zips, input
 	susfs_changelog_file = f"release-artifacts/susfs_changelog-{kernel_version}.txt"
 	susfs_version = representative.get("SUSFS_VERSION", "Not included")
 
+	source_block = "\n".join(kernel_source_lines(representative))
+
 	anchor_id = slugify(label)
 	section = f"""<a name="{anchor_id}"></a>
 ## {anchor_title}
@@ -118,6 +160,7 @@ def build_kernel_section(kernel_version, builds, repo, tag, existing_zips, input
 
 **Build details:**
 - Linux version: {representative.get('LINUX_VERSION', 'unknown')}
+{source_block}
 - Compiler: {representative.get('COMPILER_STRING', 'unknown')}
 - SuSFS: {susfs_version}
 
@@ -173,7 +216,7 @@ def build_release_body():
 - NoMount: {status_map.get(inputs['nm'], 'Disabled')}
 
 > [!Important]
-> These are **GKI** kernels, not custom kernels. Each line below supports **all** devices that shipped with the matching Linux version and Android release (stock or AOSP).
+> These are **GKI** kernels, not custom kernels. **GKI compatibility does not guarantee device compatibility.** Sharing a Linux version and Android release with a device does not make a kernel verified for it. Check the device-specific verification status in the [source registry documentation](https://github.com/{repo}/blob/HEAD/SOURCES.md#duchamp-compatibility) and the *Device status* line of the build summary before you flash.
 
 ## 🧭 Which variant should I flash?
 

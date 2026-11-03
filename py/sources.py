@@ -10,6 +10,9 @@ Usage:
     sources.py [--registry FILE] sources [<line>]
     sources.py [--registry FILE] select <line> [--source ID] [--flag NAME=value ...]
     sources.py [--registry FILE] status <source_id> [<device>]
+    sources.py [--registry FILE] provenance <source_id> [--format text|json]
+    sources.py [--registry FILE] version-check --kernel-version <line> --version <X.Y.Z> [--source ID] [--device ID]
+               [--custom-lines "6.1"] [--gha]
     sources.py [--registry FILE] gate --kernel-version <line|All> [--source ID] [--device ID]
                [--allow-unverified true|false] [--custom-lines "6.1 5.10"] [--gha]
 
@@ -42,6 +45,12 @@ KMI_RE = re.compile(r"^android\d+-\d+\.\d+$")
 DEFCONFIG_RE = re.compile(r"^[A-Za-z0-9._-]*defconfig$")
 FLAG_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+KINDS = ("device", "generic-gki")
+ROLES = ("external", "managed")
+SYNC_STRATEGIES = ("merge",)
 COMPATIBILITY = ("confirmed", "needs-verification", "unsupported")
 VERIFICATION_STATES = ("unverified", "reported", "verified")
 BASIS = ("tested", "documented", "reasoned")
@@ -51,7 +60,15 @@ TOP_KEYS = {"schema_version", "legacy_override_line", "default_device", "devices
 DEVICE_KEYS = {"name", "soc", "kernel_line", "android_release", "references"}
 LINE_KEYS = {"android_release", "kmi", "susfs_branch", "defconfig", "toolchain"}
 TOOLCHAIN_KEYS = {"name", "notes"}
-SOURCE_KEYS = {"line", "repo", "branch", "label", "default_for_line", "branch_variants", "devices"}
+SOURCE_KEYS = {
+    "line", "repo", "branch", "label", "default_for_line", "branch_variants", "devices",
+    "kind", "role", "upstream", "sync", "credits", "versions",
+}
+UPSTREAM_KEYS = {"repo", "branch", "synced_commit", "note"}
+SYNC_KEYS = {"strategy", "note"}
+CREDIT_KEYS = {"name", "url", "license"}
+VERSIONS_KEYS = {"min", "max", "reason", "verified"}
+VERSION_EVIDENCE_KEYS = {"build_verification", "boot_verification"}
 VARIANT_KEYS = {"when_flag", "branch", "label"}
 ASSESSMENT_KEYS = {
     "compatibility", "basis", "reason", "build_verification", "boot_verification", "notes",
@@ -153,6 +170,102 @@ def _check_verification(c: _Checker, value: Any, where: str) -> Optional[str]:
     return state
 
 
+def _vkey(version: str) -> tuple:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _check_provenance(c: _Checker, src: Dict[str, Any], where: str) -> None:
+    """Who controls a source: kind, role (external project or HyperCore-managed fork), upstream, sync and credits."""
+    if "kind" in src:
+        c.choice(src["kind"], f"{where}.kind", KINDS)
+    role = src.get("role", "external")
+    c.choice(role, f"{where}.role", ROLES)
+
+    credits = src.get("credits")
+    if credits is not None:
+        if not isinstance(credits, list) or not credits:
+            c.add(f"{where}.credits", "must be a non-empty list of {name, url, license} entries")
+        else:
+            for i, credit in enumerate(credits):
+                cwhere = f"{where}.credits[{i}]"
+                if c.obj(credit, cwhere, CREDIT_KEYS, {"name"}):
+                    c.string(credit.get("name"), f"{cwhere}.name")
+                    if "url" in credit:
+                        _check_repo(c, credit["url"], f"{cwhere}.url")
+                    if "license" in credit:
+                        c.string(credit["license"], f"{cwhere}.license")
+
+    if role == "managed":
+        upstream, sync = src.get("upstream"), src.get("sync")
+        if upstream is None:
+            c.add(where, "a managed source needs an 'upstream' (the external repository and branch it tracks)")
+        elif c.obj(upstream, f"{where}.upstream", UPSTREAM_KEYS, {"repo", "branch"}):
+            _check_repo(c, upstream.get("repo"), f"{where}.upstream.repo")
+            c.string(upstream.get("branch"), f"{where}.upstream.branch", BRANCH_RE, "as a branch name")
+            if "synced_commit" in upstream:
+                c.string(upstream["synced_commit"], f"{where}.upstream.synced_commit", SHA_RE, "as a full 40-character commit SHA")
+            if upstream.get("repo") == src.get("repo") and upstream.get("branch") == src.get("branch"):
+                c.add(f"{where}.upstream", "is the same repository and branch as the source itself. "
+                                           "A managed source must differ from the project it tracks")
+        if sync is None:
+            c.add(where, "a managed source needs a 'sync' policy, for example {\"strategy\": \"merge\"}")
+        elif c.obj(sync, f"{where}.sync", SYNC_KEYS, {"strategy"}):
+            if c.choice(sync.get("strategy"), f"{where}.sync.strategy", SYNC_STRATEGIES):
+                pass  # only merge keeps the original commits, authorship and version history intact
+        if not credits:
+            c.add(where, "a managed source needs 'credits' that name the original authors, so attribution is never lost")
+    else:
+        for key in ("upstream", "sync"):
+            if key in src:
+                c.add(f"{where}.{key}", "is only for managed sources. Set \"role\": \"managed\" or remove it")
+
+
+def _check_versions(c: _Checker, src: Dict[str, Any], where: str, line: Any, devices: Dict[str, Any]) -> None:
+    """Which Linux versions of a source are supported, and which were recorded as built or booted."""
+    if "versions" not in src:
+        return
+    vwhere = f"{where}.versions"
+    versions = src["versions"]
+    if not c.obj(versions, vwhere, VERSIONS_KEYS, set()):
+        return
+
+    def belongs(value: Any, at: str) -> bool:
+        if not c.string(value, at, VERSION_RE, "as a Linux version like 6.1.115"):
+            return False
+        if isinstance(line, str) and not value.startswith(line + "."):
+            c.add(at, f"'{value}' does not belong to the {line} line of this source")
+            return False
+        return True
+
+    low = versions.get("min")
+    high = versions.get("max")
+    low_ok = belongs(low, f"{vwhere}.min") if low is not None else False
+    high_ok = belongs(high, f"{vwhere}.max") if high is not None else False
+    if low_ok and high_ok and _vkey(low) > _vkey(high):
+        c.add(vwhere, f"min {low} is higher than max {high}")
+    if "reason" in versions:
+        c.string(versions["reason"], f"{vwhere}.reason")
+
+    verified = versions.get("verified", {})
+    if not isinstance(verified, dict):
+        c.add(f"{vwhere}.verified", "must be an object keyed by Linux version")
+        return
+    for version, per_device in verified.items():
+        at = f"{vwhere}.verified.{version}"
+        belongs(version, at)
+        if not isinstance(per_device, dict) or not per_device:
+            c.add(at, "must be an object keyed by device id")
+            continue
+        for dev_id, record in per_device.items():
+            rwhere = f"{at}.{dev_id}"
+            if dev_id not in devices:
+                c.add(rwhere, f"unknown device '{dev_id}'. Known: {', '.join(devices) or 'none'}")
+            if c.obj(record, rwhere, VERSION_EVIDENCE_KEYS, {"build_verification"}):
+                _check_verification(c, record.get("build_verification"), f"{rwhere}.build_verification")
+                if "boot_verification" in record:
+                    _check_verification(c, record["boot_verification"], f"{rwhere}.boot_verification")
+
+
 def check_registry(data: Dict[str, Any], name: str = "sources.json") -> List[str]:
     c = _Checker(name)
     if not c.obj(data, "(top level)", TOP_KEYS, {"schema_version", "legacy_override_line", "default_device", "devices", "lines", "sources"}):
@@ -241,6 +354,9 @@ def check_registry(data: Dict[str, Any], name: str = "sources.json") -> List[str
             if flag in seen_flags:
                 c.add(vwhere, f"flag '{flag}' is already used by an earlier variant of this source")
             seen_flags.add(flag)
+
+        _check_provenance(c, src, where)
+        _check_versions(c, src, where, line, devices)
 
         assessments = src.get("devices", {})
         if not isinstance(assessments, dict):
@@ -362,6 +478,66 @@ class Registry:
         return (f"{a['compatibility']} for {device} "
                 f"(build: {a['build_verification']['state']}, boot: {a['boot_verification']['state']})")
 
+    def provenance(self, src_id: str) -> Dict[str, Any]:
+        """Who controls a source and where it comes from, for build summaries and notifications."""
+        if src_id not in self.data["sources"]:
+            raise RegistryError([f"Unknown kernel source '{src_id}'. Known: {', '.join(self.source_ids())}"])
+        src = self.data["sources"][src_id]
+        role = src.get("role", "external")
+        upstream = src.get("upstream") or {}
+        return {
+            "source_id": src_id,
+            "kind": src.get("kind", ""),
+            "role": role,
+            "repo": src["repo"],
+            "branch": src["branch"],
+            # an external source is the original project, so it is its own upstream
+            "upstream_repo": upstream.get("repo", src["repo"]),
+            "upstream_branch": upstream.get("branch", src["branch"]),
+            "upstream_synced_commit": upstream.get("synced_commit", ""),
+            "credits": src.get("credits", []),
+        }
+
+    def describe_provenance(self, src_id: str) -> str:
+        p = self.provenance(src_id)
+        kind = {"device": "device source", "generic-gki": "generic GKI source"}.get(p["kind"], "source")
+        if p["role"] == "managed":
+            text = f"HyperCore-managed {kind}, tracks {_short_repo(p['upstream_repo'])} @ {p['upstream_branch']}"
+            if p["upstream_synced_commit"]:
+                text += f" (synced at {p['upstream_synced_commit'][:12]})"
+            return text
+        return f"external {kind} (the original project, not managed by HyperCore)"
+
+    def check_version(self, line: str, source_id: str = "", version: str = "", device: str = "",
+                      custom: bool = False) -> Dict[str, Any]:
+        """Check one Linux version against the range and the build records of the selected source."""
+        device = device or self.default_device
+        src_id, src = self.pick_source(line, source_id)
+        errors: List[str] = []
+        notes: List[tuple] = []
+        if not VERSION_RE.match(version or ""):
+            raise RegistryError([f"'{version}' is not a Linux version (expected MAJOR.MINOR.SUBLEVEL)"])
+        if not version.startswith(line + "."):
+            raise RegistryError([f"Linux {version} belongs to the {'.'.join(version.split('.')[:2])} line, but the selected kernel base is {line}"])
+        if custom:
+            notes.append(("warning", f"{line}: the version range of {src_id} is not applied because a repository variable replaces the source"))
+            return {"errors": errors, "notes": notes}
+
+        versions = src.get("versions", {})
+        reason = f" ({versions['reason']})" if versions.get("reason") else ""
+        if versions.get("min") and _vkey(version) < _vkey(versions["min"]):
+            errors.append(f"Linux {version} is below the lowest version {src_id} supports, {versions['min']}{reason}")
+        if versions.get("max") and _vkey(version) > _vkey(versions["max"]):
+            errors.append(f"Linux {version} is above the highest version {src_id} supports, {versions['max']}{reason}")
+        if not errors:
+            record = versions.get("verified", {}).get(version, {}).get(device)
+            if record:
+                boot = record.get("boot_verification", {}).get("state", "unverified")
+                notes.append(("notice", f"Linux {version} on {src_id}: build {record['build_verification']['state']}, boot {boot} recorded for {device}"))
+            else:
+                notes.append(("notice", f"Linux {version} has no recorded build or boot result for {src_id} on {device}"))
+        return {"errors": errors, "notes": notes}
+
     def select(self, line: str, flags: Optional[Dict[str, str]] = None, source_id: str = "") -> Dict[str, str]:
         """The source for `line` (its default unless `source_id` is given), with the branch variant that matches the active flags."""
         flags = flags or {}
@@ -382,6 +558,10 @@ class Registry:
             "branch_label": branch_label,
             "variant_flag": variant_flag,
         }
+
+
+def _short_repo(url: str) -> str:
+    return re.sub(r"^https://(www\.)?github\.com/", "", url).rstrip("/")
 
 
 def gate(registry: Registry, kernel_version: str, source_id: str = "", device: str = "",
@@ -475,6 +655,16 @@ def main(argv: List[str]) -> int:
     p_status = sub.add_parser("status")
     p_status.add_argument("source_id")
     p_status.add_argument("device", nargs="?", default="")
+    p_prov = sub.add_parser("provenance")
+    p_prov.add_argument("source_id")
+    p_prov.add_argument("--format", choices=("text", "json"), default="text")
+    p_ver = sub.add_parser("version-check")
+    p_ver.add_argument("--kernel-version", required=True)
+    p_ver.add_argument("--version", required=True)
+    p_ver.add_argument("--source", default="")
+    p_ver.add_argument("--device", default="")
+    p_ver.add_argument("--custom-lines", default="")
+    p_ver.add_argument("--gha", action="store_true")
     p_gate = sub.add_parser("gate")
     p_gate.add_argument("--kernel-version", required=True)
     p_gate.add_argument("--source", default="")
@@ -507,6 +697,22 @@ def main(argv: List[str]) -> int:
             if args.source_id not in registry.data["sources"]:
                 raise RegistryError([f"Unknown kernel source '{args.source_id}'. Known: {', '.join(registry.source_ids())}"])
             print(registry.describe_status(args.source_id, args.device or registry.default_device))
+        elif args.command == "provenance":
+            if args.format == "json":
+                print(json.dumps(registry.provenance(args.source_id)))
+            else:
+                print(registry.describe_provenance(args.source_id))
+        elif args.command == "version-check":
+            result = registry.check_version(args.kernel_version, args.source, args.version, args.device,
+                                            custom=args.kernel_version in args.custom_lines.split())
+            for level, text in result["notes"]:
+                tag = {"warning": "warning", "notice": "notice"}.get(level, "notice")
+                print(f"::{tag}::{text}" if args.gha else f"[{'!' if level == 'warning' else '*'}] {text}", file=sys.stderr)
+            for text in result["errors"]:
+                print(f"::error::{text}" if args.gha else f"[-] {text}", file=sys.stderr)
+            if result["errors"]:
+                return 1
+            print(args.version)
         elif args.command == "gate":
             result = gate(registry, args.kernel_version, args.source, args.device,
                           args.allow_unverified.strip().lower() == "true", args.custom_lines.split())

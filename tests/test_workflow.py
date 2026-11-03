@@ -153,5 +153,74 @@ class CiFixes(unittest.TestCase):
             self.assertIn(key, build_step["env"], key)
 
 
+class PinHandOff(unittest.TestCase):
+    """The first job resolves the version pin once; every build uses that result and never the raw input."""
+
+    def test_prepare_publishes_the_resolved_pin(self):
+        data = load()
+        outputs = data["jobs"]["prepare"]["outputs"]
+        for name in ("pin_request", "pin_version", "pin_commit"):
+            self.assertEqual(outputs[name], "${{ steps.gate.outputs.%s }}" % name)
+        gate = next(s for s in data["jobs"]["prepare"]["steps"] if s.get("id") == "gate")
+        for name in ("pin_request", "pin_version", "pin_commit"):
+            self.assertIn(f'echo "{name}=$' , gate["run"], name)
+        self.assertIn("preflight_pin", gate["run"])
+        self.assertIn("py/sources.py version-check", gate["run"])
+
+    def test_builds_take_the_pin_from_the_first_job_not_from_the_input(self):
+        build_step = next(s for s in load()["jobs"]["build"]["steps"] if s.get("name") == "Run Build Script")
+        self.assertEqual(build_step["env"]["KERNEL_EXACT_VERSION"], "${{ needs.prepare.outputs.pin_version }}")
+        self.assertEqual(build_step["env"]["KERNEL_PIN_REQUEST"], "${{ needs.prepare.outputs.pin_request }}")
+        self.assertEqual(build_step["env"]["KERNEL_PIN_COMMIT"], "${{ needs.prepare.outputs.pin_commit }}")
+        self.assertNotIn("github.event.inputs.KERNEL_EXACT_VERSION", json.dumps(build_step["env"]))
+
+    def test_the_first_job_resolves_the_raw_input_exactly_once(self):
+        data = load()
+        raw = [name for name, job in data["jobs"].items()
+               if "github.event.inputs.KERNEL_EXACT_VERSION" in json.dumps(job)]
+        self.assertEqual(raw, ["prepare"])
+
+
+class VersionFieldLabel(unittest.TestCase):
+    """The label of KERNEL_EXACT_VERSION has to name everything the field accepts."""
+
+    @staticmethod
+    def selectors():
+        sys.path.insert(0, str(ROOT / "py"))
+        import kernel_versions
+        return kernel_versions.KEYWORDS
+
+    def label(self):
+        return form(load())["KERNEL_EXACT_VERSION"]["description"]
+
+    def test_it_names_both_latest_selectors(self):
+        label = self.label()
+        self.assertIn("latest-lts", label)
+        self.assertIn("latest-stable", label)
+
+    def test_it_names_every_selector_the_resolver_supports(self):
+        """If a selector is ever added to kernel_versions.py, the form label has to be updated with it."""
+        for keyword in self.selectors():
+            self.assertIn(keyword, self.label(), f"the form label does not mention {keyword}")
+
+    def test_it_still_says_a_version_or_a_commit_can_be_given(self):
+        label = self.label().lower()
+        self.assertIn("version", label)
+        self.assertIn("commit", label)
+
+    def test_the_label_is_exactly_the_reviewed_text_and_fits_the_limit(self):
+        self.assertEqual(self.label(), "[Kernel] Version, commit, latest-lts or latest-stable")
+        self.assertLessEqual(len(self.label()), 55)
+
+    def test_the_readme_describes_the_same_two_selectors(self):
+        row = next(line for line in (ROOT / "README.md").read_text(encoding="utf-8").splitlines() if line.startswith("| Kernel | `KERNEL_EXACT_VERSION`"))
+        for keyword in self.selectors():
+            self.assertIn(keyword, row)
+
+    def test_the_key_type_and_default_are_unchanged(self):
+        spec = form(load())["KERNEL_EXACT_VERSION"]
+        self.assertEqual((spec.get("type"), spec.get("default")), ("string", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

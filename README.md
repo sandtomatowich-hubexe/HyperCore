@@ -207,7 +207,7 @@ The Run workflow form lists the options in groups, and every label starts with i
 | Run | `CLEAN_LTO_CACHE` | on | Clears the ThinLTO cache to avoid a known `.config` bug |
 | Kernel | `KERNEL_VERSION` | `6.1` | Kernel line: `6.1`, `5.10`, `5.15`, `6.6`, `6.12` or `All` |
 | Kernel | `KERNEL_SOURCE` | empty | Id of a source in `sources.json`. Empty (or `default`) keeps the default source of the line. See [SOURCES.md](SOURCES.md) |
-| Kernel | `KERNEL_EXACT_VERSION` | empty | Exact Linux version inside the selected line, for example `6.1.180`, or a commit SHA of 7 to 40 hex characters. Empty keeps the branch default. See [Exact kernel version](#exact-kernel-version) |
+| Kernel | `KERNEL_EXACT_VERSION` | empty | Pin the Linux version: `6.1.180`, a commit SHA (7 to 40 hex characters), `latest-stable` or `latest-lts` (both scoped to the selected line). Empty keeps the branch default. See [Exact kernel version](#exact-kernel-version) |
 | Kernel | `ALLOW_UNVERIFIED` | off | Lets you choose a source that is not verified for the device. Never unlocks an unsupported source |
 | Kernel | `LTO` | `fullLTO` | `fullLTO`, `thinLTO` or `noneLTO`. Full LTO is the slowest and needs the most RAM |
 | Variant | `BUILD_VANILLA` | on | Vanilla and Vanilla+NoLTO |
@@ -276,7 +276,7 @@ is configured in `sources.json`.
 
 ## Exact kernel version
 
-`KERNEL_VERSION` selects the kernel line. `KERNEL_EXACT_VERSION` optionally pins one release inside it, as a Linux version or as a commit.
+`KERNEL_VERSION` selects the kernel line. `KERNEL_EXACT_VERSION` optionally pins one release inside it: a Linux version, a commit, or `latest-stable` / `latest-lts`.
 
 | KERNEL_VERSION | KERNEL_EXACT_VERSION | Result |
 |---|---|---|
@@ -285,7 +285,18 @@ is configured in `sources.json`.
 | `5.10` | `5.10.209` | The source state that reports Linux 5.10.209 |
 | `5.10` | `6.1.180` | Rejected before anything is built: 6.1.180 belongs to the 6.1 line |
 | `6.1` | `0123abc` (7 to 40 hex characters) | That commit, if it is on the selected source branch and its Makefile reports a 6.1 version |
+| `6.1` | `latest-lts` | The newest 6.1 release that kernel.org lists as longterm, if the source has it |
+| `6.6` | `latest-stable` | The newest 6.6 release that kernel.org lists as stable or longterm, if the source has it |
 | `All` | `6.1.180` | Rejected: an exact version needs a single kernel line |
+
+**`latest-stable` and `latest-lts`.** Both stay inside the selected line, so `6.1` never answers with a 6.6 release.
+`latest-stable` is the newest release of the line that kernel.org lists as stable or longterm. `latest-lts` is the same, but
+kernel.org must list the line as longterm, and it is refused for a line that is not an LTS series. The newest release comes from
+kernel.org's official list (`https://www.kernel.org/releases.json`) and is turned into one exact version by the first job. Every
+build then uses that same version and the same commit, and the summary records what was requested, what it resolved to, and
+the full commit. If kernel.org cannot be read, or the selected source does not have that version yet (GKI sources lag
+upstream), the run stops and names the nearest versions the source has. **It never builds another version instead.**
+The spelling `Latest LTS` or `latest_lts` is accepted too.
 
 **Where the source comes from.** GKI kernels need Android's patches (ABI, vendor hooks), so a plain kernel.org tag would
 not be a GKI kernel. The exact version is therefore searched on the [configured kernel source](#kernel-source): by default the
@@ -299,6 +310,10 @@ upstream stable release, so each release appears in their history.
 requested version. That is the branch state right before the next release was merged, so it contains the fixes that
 landed for that release. After checkout, `make kernelversion` must report exactly the requested version or the build stops.
 If the version does not exist on the branch, the error names the nearest versions that do.
+
+**Supported versions.** A source in `sources.json` can declare the range of Linux versions it supports and which versions
+were recorded as built or booted (see [SOURCES.md](SOURCES.md)). A version outside the range is refused. A version without a
+record builds, and the summary says that no build was recorded.
 
 **What is recorded.** Every build, with or without an exact version, writes the kernel repository, branch, resolved commit
 and susfs4ksu commit to the job summary, and the release notes show the kernel and susfs4ksu commits.
@@ -354,6 +369,10 @@ always arrives. If part of the build failed, an extra message tells you so and l
 | `has no branch/tag 'x'` | That branch does not exist on the fork. Set `BSU_REF`, `KSUN_REF`, `KSUN_REPO` or `FINA_REF` |
 | `duplicate symbol: my_...` or `undefined symbol: my_...` while linking BakaSU | The SUSFS hooks are classified from the real source at build time, so this should not happen any more. If it does, send the `BakaSU SUSFS hook check` table from the job summary |
 | `BakaSU blocks this SUSFS revision` | BakaSU's maintainers refuse SUSFS revisions they have not caught up with. Pin `SUSFS_COMMIT` to a revision that works, or pin `BSU_REF` |
+| `Committer identity unknown` / `empty ident name ... not allowed` while applying patches | A patch step needs to create a git commit and git has no identity. The build now sets one itself (`ensure_git_identity`). If you still see it, the script that failed was run outside `build.sh` |
+| `latest-lts means Linux X on the 6.1 line, but the selected source does not have it` | The source has not merged that upstream release yet. Pin a version the error lists, or wait for the source to catch up |
+| `Could not read the kernel.org release list` | `latest-*` needs kernel.org. Pin an exact version or commit to build without it |
+| `... is below/above the lowest/highest version ... supports` | The source declares a supported range in `sources.json` and the version is outside it |
 | `... is unsupported for duchamp: ...` | That kernel line has no source that supports the device. See the compatibility table in [SOURCES.md](SOURCES.md) |
 | `Selecting a source that is not verified needs ALLOW_UNVERIFIED=true` | You named a source that nobody has verified for the device. Turn `ALLOW_UNVERIFIED` on if you accept that |
 | `Unknown kernel source '...'. Did you mean ...` | `KERNEL_SOURCE` must be an id listed in `sources.json` for the selected line |
@@ -384,6 +403,8 @@ failing step in the job page shows a one-line error.
 | `kernel-patches/`, `patches/` | Kernel and root-fork patches |
 | `zram/` | Upgraded LZ4 library and NEON decompressor used by the LZ4KD option |
 | `sources.json`, `SOURCES.md` | The kernel source registry and its documentation |
+| `PROBE.md`, `py/module_probe.py` | The read-only compatibility probe: how a release string interacts with module loading |
+| `MANAGED_SOURCES.md` | Requirements for moving to a HyperCore-managed source (documentation only, nothing created) |
 | `py/` | Build matrix, source registry (`sources.py`), exact-version helpers and KMI helpers |
 | `tests/` | Registry, gate, pin, workflow and backward-compatibility tests (`bash tests/run_all.sh`) |
 | `scripts/finasu/` | FinaSU manager certificate helper |

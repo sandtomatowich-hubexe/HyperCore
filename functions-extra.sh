@@ -52,6 +52,32 @@ link_ksu_tree() {
     grep -q 'source "drivers/kernelsu/Kconfig"' "$drv/Kconfig" || sed -i '/endmenu/i source "drivers/kernelsu/Kconfig"' "$drv/Kconfig"
 }
 
+# Patching creates commits (git cherry-pick, merge, commit). A CI runner has no git identity, and git then stops with
+# "Committer identity unknown" (or "empty ident name ... not allowed"). This gives the build an identity through the
+# environment, so no git config file is modified, and only when git has no usable identity of its own, so an identity
+# you configured yourself is kept. Safe to call more than once.
+ensure_git_identity() {
+    if command git var GIT_COMMITTER_IDENT >/dev/null 2>&1 && command git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+        return 0
+    fi
+    export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gkid-ci}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci@localhost}"
+    export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gkid-ci}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci@localhost}"
+}
+
+# pershoot's two susfs4ksu fixes (they touch only kernel_patches/fs/susfs.c), cherry-picked onto the SUSFS checkout.
+# PERSHOOT_SUSFS_URL and PERSHOOT_SUSFS_COMMITS override the source and the commits (the tests use a local repository).
+apply_pershoot_susfs_fixes() {
+    local url="${PERSHOOT_SUSFS_URL:-https://gitlab.com/pershoot/susfs4ksu.git}" commit
+    local -a commits
+    read -r -a commits <<< "${PERSHOOT_SUSFS_COMMITS:-6387756d64b3ab9ececefc4523627a9ee05a7519 161c058fed5544a6573d87124f346dadd5c4962d}"
+
+    ensure_git_identity
+    ( cd "$SUSFS_DIR" \
+      && git fetch -q "$url" "${commits[@]}" \
+      && for commit in "${commits[@]}"; do git cherry-pick "$commit" || exit 1; done ) \
+      || { error "pershoot susfs4ksu fixes failed to apply"; exit 1; }
+}
+
 # KernelSU-Next with SUSFS: pershoot's dev-susfs fork already ships SUSFS (no KernelSU-side patch).
 # Steps follow WildKernels/GKI_KernelSU_SUSFS.
 install_ksun() {
@@ -72,13 +98,7 @@ install_ksun() {
 
     clone_susfs
     if [ "$repo" = "pershoot/KernelSU-Next" ]; then
-        # pershoot's two susfs4ksu fixes (touch only kernel_patches/fs/susfs.c)
-        ( cd "$SUSFS_DIR" \
-          && git fetch -q https://gitlab.com/pershoot/susfs4ksu.git \
-               6387756d64b3ab9ececefc4523627a9ee05a7519 161c058fed5544a6573d87124f346dadd5c4962d \
-          && git cherry-pick 6387756d64b3ab9ececefc4523627a9ee05a7519 \
-          && git cherry-pick 161c058fed5544a6573d87124f346dadd5c4962d ) \
-          || { error "pershoot susfs4ksu fixes failed to apply"; exit 1; }
+        apply_pershoot_susfs_fixes
     fi
     apply_susfs_patches
 }
@@ -289,6 +309,9 @@ write_tg_meta() {
     fi
     ZIP_NAME="$zip" ROOT_NAME="$rname" ROOT_REPO="$rrepo" ROOT_VER="$rver" ROOT_COUNT="$rcount" \
     SRC_REPO="$(simplify_gh_url "$KERNEL_REPO")" SRC_BRANCH="$KERNEL_BRANCH" \
+    META_SRC_ID="${KERNEL_SOURCE_ID:-}" META_SRC_OVERRIDDEN="$(source_overridden && echo true || echo false)" \
+    META_PROV="$(registry provenance "${KERNEL_SOURCE_ID:-}" --format json 2>/dev/null || true)" \
+    META_COMMIT="$(command git -C "$KSRC" rev-parse HEAD 2>/dev/null || true)" META_PIN_REQUEST="${KERNEL_PIN_REQUEST:-${KERNEL_EXACT_VERSION:-}}" \
     META_LTO="$LTO" META_COMPILER="${COMPILER_STRING:-}" META_SUSFS="${SUSFS_VERSION:-}" META_LINUX="$LINUX_VERSION" \
     META_VARIANT="$VARIANT" META_OUT="$RELEASE_DIR/${zip%.zip}.meta.json" \
     python3 - <<'PY'
@@ -298,6 +321,8 @@ def flag(k): return e(k, "false") == "true"
 meta = {
     "zip": e("ZIP_NAME"), "variant": e("META_VARIANT"), "linux": e("META_LINUX"),
     "source_repo": e("SRC_REPO"), "source_branch": e("SRC_BRANCH"),
+    "source_id": e("META_SRC_ID"), "source_overridden": e("META_SRC_OVERRIDDEN") == "true",
+    "commit": e("META_COMMIT"), "pin_request": e("META_PIN_REQUEST"),
     "compiler": e("META_COMPILER"), "lto": e("META_LTO"), "susfs": e("META_SUSFS"),
     "root": {"name": e("ROOT_NAME"), "repo": e("ROOT_REPO"), "version": e("ROOT_VER"), "count": e("ROOT_COUNT")},
     "features": {
@@ -306,6 +331,14 @@ meta = {
         "mm": "+MM" in (e("META_VARIANT") or ""),
     },
 }
+try:
+    # Who controls the source and which external project it comes from, so notifications never present an upstream
+    # branch as a HyperCore one
+    prov = json.loads(e("META_PROV") or "null")
+except ValueError:
+    prov = None
+if prov:
+    meta["provenance"] = {k: prov.get(k) for k in ("role", "kind", "upstream_repo", "upstream_branch", "credits")}
 with open(e("META_OUT"), "w") as f:
     json.dump(meta, f, indent=1)
 PY
@@ -318,6 +351,22 @@ PY
 # Clone the kernel source. Without KERNEL_EXACT_VERSION this is the original shallow clone of the branch tip.
 # With it, the branch history is fetched commit-only (no file contents), the commit that carries exactly that
 # Linux version is found from the Makefile (py/resolve_kernel_commit.py) and checked out.
+# latest-stable / latest-lts become one exact version of the selected kernel line, from kernel.org's release list.
+# KERNEL_PIN_REQUEST remembers what was asked. Any other value is left alone. Never substitutes: failing to read the
+# list, or a line kernel.org does not list, is an error.
+resolve_pin_keyword() {
+    local kind exact
+    kind="$(python3 "${WORKDIR:-.}/py/kernel_versions.py" classify "${KERNEL_EXACT_VERSION:-}")" || return 1
+    case "$kind" in
+        latest-stable|latest-lts)
+            exact="$(python3 "${WORKDIR:-.}/py/kernel_versions.py" resolve --line "$KERNEL_VERSION" --pin "$kind")" \
+                || { error "Could not resolve '$KERNEL_EXACT_VERSION' for the $KERNEL_VERSION line, see the problem above"; return 1; }
+            KERNEL_PIN_REQUEST="$kind"
+            KERNEL_EXACT_VERSION="$exact"
+            ;;
+    esac
+}
+
 clone_kernel_source() {
     if [ -z "${KERNEL_EXACT_VERSION:-}" ]; then
         if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
@@ -329,17 +378,26 @@ clone_kernel_source() {
     fi
 
     python3 "$WORKDIR/py/kernelver.py" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION" || exit 1
-    log "Exact kernel version requested: $KERNEL_EXACT_VERSION (base $KERNEL_VERSION)"
+    resolve_pin_keyword || exit 1
+    # The first job resolves the pin once and hands every build the same commit, so a push that lands while the matrix
+    # runs cannot give two variants different sources. Without it (build.sh run by hand) the pin is resolved here.
+    local pin="${KERNEL_PIN_COMMIT:-$KERNEL_EXACT_VERSION}"
+    log "Exact kernel version requested: ${KERNEL_PIN_REQUEST:-$KERNEL_EXACT_VERSION} (base $KERNEL_VERSION)"
 
     # Servers that do not support partial clones ignore the filter and send the full history instead
     git clone -q --filter=tree:0 --no-checkout --single-branch "$KERNEL_REPO" -b "$KERNEL_BRANCH" "$KSRC"
     local res sha
-    res="$(python3 "$WORKDIR/py/resolve_kernel_commit.py" "$KSRC" "refs/remotes/origin/$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION")" \
-        || { error "Could not resolve '$KERNEL_EXACT_VERSION' on $KERNEL_BRANCH, see the problem above"; exit 1; }
+    res="$(python3 "$WORKDIR/py/resolve_kernel_commit.py" "$KSRC" "refs/remotes/origin/$KERNEL_BRANCH" "$KERNEL_VERSION" "$pin")" \
+        || { error "Could not resolve '$pin' on $KERNEL_BRANCH, see the problem above"; exit 1; }
     sha="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
     # For a commit pin, the Linux version is whatever that commit's Makefile reports
     KERNEL_PIN_EXPECTED_VERSION="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
-    log "$KERNEL_EXACT_VERSION is commit $sha (Linux $KERNEL_PIN_EXPECTED_VERSION)"
+    # A pinned version must match what the commit reports. The first job resolved both, so a mismatch means the history moved.
+    if [[ "$KERNEL_EXACT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && [ "$KERNEL_EXACT_VERSION" != "$KERNEL_PIN_EXPECTED_VERSION" ]; then
+        error "Commit $sha reports Linux $KERNEL_PIN_EXPECTED_VERSION but Linux $KERNEL_EXACT_VERSION was requested. Not substituting"
+        exit 1
+    fi
+    log "$pin is commit $sha (Linux $KERNEL_PIN_EXPECTED_VERSION)"
     command git -C "$KSRC" checkout -q --detach "$sha"
     if kernel_version_eq "$KERNEL_VERSION" "6.1"; then
         command git -C "$KSRC" submodule update --init --recursive --depth 1 -q \
@@ -380,18 +438,39 @@ record_kernel_source() {
         *github.com*) link="https://github.com/$repo_label/commit/$sha" ;;
         *)            link="${origin%.git}/+/$sha" ;;
     esac
+    # Who controls this source, for every report: a HyperCore-managed source and the upstream project it tracks are
+    # always named separately, and an external project is never presented as HyperCore's.
+    local prov_role prov_kind prov_up_repo prov_up_branch overridden=false
+    source_overridden && overridden=true
+    read -r prov_role prov_kind prov_up_repo prov_up_branch <<< "$(registry provenance "${KERNEL_SOURCE_ID:-}" --format json 2>/dev/null \
+        | python3 -c 'import json,sys; p=json.load(sys.stdin); print(p.get("role") or "unknown", p.get("kind") or "-", p.get("upstream_repo") or "-", p.get("upstream_branch") or "-")' 2>/dev/null || echo "unknown - - -")"
+    [ "$prov_kind" = "-" ] && prov_kind=""; [ "$prov_up_repo" = "-" ] && prov_up_repo=""; [ "$prov_up_branch" = "-" ] && prov_up_branch=""
+    {
+        echo "KERNEL_SOURCE_ID=${KERNEL_SOURCE_ID:-}"
+        echo "KERNEL_SOURCE_ROLE=${prov_role:-unknown}"
+        echo "KERNEL_SOURCE_KIND=$prov_kind"
+        echo "KERNEL_SOURCE_OVERRIDDEN=$overridden"
+        echo "KERNEL_UPSTREAM_REPO=$prov_up_repo"
+        echo "KERNEL_UPSTREAM_BRANCH=$prov_up_branch"
+    } >> "$GITHUB_ENV"
     {
         echo "KERNEL_COMMIT=$sha"
-        echo "KERNEL_EXACT_REQUESTED=${KERNEL_EXACT_VERSION:-}"
+        echo "KERNEL_EXACT_REQUESTED=${KERNEL_PIN_REQUEST:-${KERNEL_EXACT_VERSION:-}}"
         echo "KERNEL_SOURCE_URL=$origin"
         echo "KERNEL_SOURCE_REPO=$repo_label"
         echo "KERNEL_SOURCE_BRANCH=$KERNEL_BRANCH"
         echo "KERNEL_TAG=$tag"
     } >> "$GITHUB_ENV"
-    log "Kernel source: $origin, branch $KERNEL_BRANCH, commit ${sha:0:12}${tag:+, tag $tag}, Linux $LINUX_VERSION"
+    log "Kernel source: $origin, branch $KERNEL_BRANCH, commit ${sha:0:12}${tag:+, tag $tag}, Linux $LINUX_VERSION ($([ "$overridden" = true ] && echo "custom source, not assessed" || registry provenance "${KERNEL_SOURCE_ID:-}" 2>/dev/null || echo "source role unknown"))"
     {
         echo "### Kernel source"
-        echo "The kernel is fetched from an external repository. It is not part of this repository."
+        if [ "$overridden" = true ]; then
+            echo "The kernel is fetched from a repository set by a repository variable. HyperCore has not assessed it. It is not part of this repository."
+        elif [ "$prov_role" = managed ]; then
+            echo "The kernel is fetched from a repository managed by HyperCore, which tracks an external upstream project. It is not part of this repository."
+        else
+            echo "The kernel is fetched from an external project's repository, not managed by HyperCore. It is not part of this repository."
+        fi
         echo
         echo "| | |"
         echo "|---|---|"
@@ -402,8 +481,12 @@ record_kernel_source() {
         echo "| Tag | ${tag:-none} |"
         echo "| Kernel base | $KERNEL_VERSION |"
         echo "| Registry source | \`${KERNEL_SOURCE_ID:-unknown}\`$(source_overridden && echo ' (replaced by a repository variable)') |"
+        echo "| Source role | $(registry provenance "$KERNEL_SOURCE_ID" 2>/dev/null || echo unknown) |"
+        echo "| Upstream project | $(registry provenance "$KERNEL_SOURCE_ID" --format json 2>/dev/null | python3 -c 'import json,sys; p=json.load(sys.stdin); print("%s @ %s" % (p["upstream_repo"], p["upstream_branch"]))' 2>/dev/null || echo unknown) |"
         echo "| Device status | $(source_overridden && echo 'not assessed, the source was replaced by a repository variable' || registry status "$KERNEL_SOURCE_ID" ${HYPERCORE_DEVICE:+"$HYPERCORE_DEVICE"} 2>/dev/null || echo unknown) |"
-        echo "| Requested exact version or commit | ${KERNEL_EXACT_VERSION:-none (branch default)} |"
+        echo "| Requested exact version or commit | ${KERNEL_PIN_REQUEST:-${KERNEL_EXACT_VERSION:-none (branch default)}} |"
+        echo "| Resolved Linux version | $LINUX_VERSION |"
+        echo "| Resolved commit | \`$(command git -C "$KSRC" rev-parse HEAD)\` |"
         echo "| Linux version | $LINUX_VERSION |"
         if [ -n "$subs" ]; then
             echo "| Submodules | $(printf '%s' "$subs" | sed 's/ (.*//' | awk '{printf "`%s` %s<br>", substr($1,1,12), $2}') |"
@@ -513,14 +596,53 @@ preflight_pin_for() {  # preflight_pin_for <repo> <branch> <kernel line> <versio
     res="$(python3 "${WORKDIR:-.}/py/resolve_kernel_commit.py" "$dir" "refs/remotes/origin/$branch" "$line" "$pin")"; rc=$?
     rm -rf "$dir"
     [ "$rc" -eq 0 ] || return 1
-    echo "$pin resolves to $(printf '%s' "$res" | python3 -c 'import json,sys; r=json.load(sys.stdin); print(r["commit"], "(Linux " + r["version"] + ")")')"
+    # Set for the caller (this function must not run in a subshell): the full commit and the Linux version it reports
+    PIN_COMMIT="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"])')"
+    PIN_VERSION="$(printf '%s' "$res" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])')"
+    echo "$pin resolves to $PIN_COMMIT (Linux $PIN_VERSION)"
 }
 
 # The same check for the kernel source that the current KERNEL_VERSION and variables select
+# Sets PIN_COMMIT and PIN_VERSION, and KERNEL_PIN_REQUEST when a latest-* selector was turned into a version.
 preflight_pin() {
     [ -n "${KERNEL_EXACT_VERSION:-}" ] || return 0
+    resolve_pin_keyword || return 1
     resolve_kernel_source_config >/dev/null || return 1
-    preflight_pin_for "$KERNEL_REPO" "$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION"
+    preflight_pin_for "$KERNEL_REPO" "$KERNEL_BRANCH" "$KERNEL_VERSION" "$KERNEL_EXACT_VERSION" || {
+        [ -z "${KERNEL_PIN_REQUEST:-}" ] \
+            || error "${KERNEL_PIN_REQUEST} means Linux $KERNEL_EXACT_VERSION on the $KERNEL_VERSION line, but the selected source does not have it. Not substituting another version"
+        return 1
+    }
+}
+
+# Optional, read-only compatibility probe (repository variable HYPERCORE_PROBE=true). It reads the cloned source and the
+# generated .config and writes a report next to the build artifacts and into the job summary. It changes nothing: not the
+# source, not LOCALVERSION, no commit. A failing probe only prints a warning, so it can never break a build.
+# Needs KSRC, OUTDIR and RELEASE_DIR. See PROBE.md.
+run_compat_probe() {
+    [ "${HYPERCORE_PROBE:-}" = "true" ] || return 0
+    local out="${RELEASE_DIR:?}" name="${VARIANT:-build}" sha7
+    sha7="$(command git -C "$KSRC" --no-optional-locks rev-parse --short HEAD 2>/dev/null || true)"
+    mkdir -p "$out"
+    if python3 "${WORKDIR:-.}/py/module_probe.py" --src "$KSRC" --config "$OUTDIR/.config" \
+            --kernel-name "${KERNEL_NAME:-}" --run-num="${RUN_NUM:-}" --sha7 "$sha7" --brand "${HYPERCORE_PROBE_BRAND:-HyperCore}" \
+            --json "$out/probe-$name.json" --markdown "$out/probe-$name.md" >/dev/null; then
+        [ -z "${GITHUB_STEP_SUMMARY:-}" ] || cat "$out/probe-$name.md" >> "$GITHUB_STEP_SUMMARY"
+        log "Compatibility probe written to probe-$name.md and probe-$name.json (read-only, nothing was changed)"
+    else
+        warning "The compatibility probe failed. The build continues unchanged."
+    fi
+    return 0
+}
+
+# The registry's view of the Linux version this build really has: the supported range of the source (an error) and
+# whether a build or boot of it was recorded (information). Needs LINUX_VERSION and resolve_kernel_source_config.
+enforce_version_policy() {
+    local custom=""
+    source_overridden && custom="$KERNEL_VERSION"
+    registry version-check --kernel-version "$KERNEL_VERSION" --source "${KERNEL_SOURCE:-}" --version "$LINUX_VERSION" \
+        ${HYPERCORE_DEVICE:+--device "$HYPERCORE_DEVICE"} --custom-lines "$custom" >/dev/null \
+        || { error "Linux $LINUX_VERSION is not supported by this source, see the problem above"; exit 1; }
 }
 
 # True when a repository variable replaced the registry's repository or branch (needs resolve_kernel_source_config

@@ -50,7 +50,7 @@ on:
         type: string
 
       KERNEL_EXACT_VERSION:
-        description: "[Kernel] Exact version or commit (empty = latest)"
+        description: "[Kernel] Version, commit, latest-lts or latest-stable"
         default: ""
         type: string
 
@@ -155,6 +155,9 @@ env:
   DEBIAN_FRONTEND: noninteractive
   # Repository variables that replace the kernel source of sources.json. Workflow level, so the first job (source
   # gate) and every build job see the same values.
+  # Opt-in, read-only compatibility probe (PROBE.md). Set the repository variable HYPERCORE_PROBE to true for one run.
+  HYPERCORE_PROBE: ${{ vars.HYPERCORE_PROBE }}
+  HYPERCORE_PROBE_BRAND: ${{ vars.HYPERCORE_PROBE_BRAND }}
   KERNEL_REPO: ${{ vars.KERNEL_REPO }}
   KERNEL_BRANCH: ${{ vars.KERNEL_BRANCH }}
   KERNEL_BRANCH_NH: ${{ vars.KERNEL_BRANCH_NH }}
@@ -196,6 +199,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
+      pin_request: ${{ steps.gate.outputs.pin_request }}
+      pin_version: ${{ steps.gate.outputs.pin_version }}
+      pin_commit: ${{ steps.gate.outputs.pin_commit }}
 
     steps:
       - name: Checkout source
@@ -240,15 +246,28 @@ jobs:
             --custom-lines "$custom" --gha)"
           echo "lines=$lines" >> "$GITHUB_OUTPUT"
 
-          # A pinned version or commit must exist in the selected source. Checked once here with a commit-only clone,
-          # instead of in every build job after the full clone.
+          # A pinned version, a commit, or latest-stable / latest-lts must resolve to a real commit of the selected source.
+          # Resolved once here, with a commit-only clone, and handed to every build job as the same version and commit.
+          pin_request=""; pin_version=""; pin_commit=""
           if [ -n "$KERNEL_EXACT_VERSION" ]; then
-            if ! out="$(preflight_pin 2>&1)"; then
-              echo "::error::$(printf '%s' "$out" | sed 's/\x1b\[[0-9;]*m//g' | tr '\n' ' ')"
+            pin_request="$KERNEL_EXACT_VERSION"
+            log_file="$(mktemp)"
+            if ! preflight_pin >"$log_file" 2>&1; then
+              echo "::error::$(sed 's/\x1b\[[0-9;]*m//g' "$log_file" | tr '\n' ' ')"
               exit 1
             fi
-            printf '%s\n' "$out" | sed 's/\x1b\[[0-9;]*m//g'
+            sed 's/\x1b\[[0-9;]*m//g' "$log_file"
+            pin_version="$PIN_VERSION"; pin_commit="$PIN_COMMIT"
+            # The registry's supported range for this version, and whether a build of it was recorded
+            python3 py/sources.py version-check --kernel-version "$KERNEL_VERSION" --source "$KERNEL_SOURCE" \
+              --version "$pin_version" ${HYPERCORE_DEVICE:+--device "$HYPERCORE_DEVICE"} --custom-lines "$custom" --gha >/dev/null
+            echo "Pin resolved: requested '$pin_request', Linux $pin_version, commit $pin_commit" >> "$GITHUB_STEP_SUMMARY"
           fi
+          {
+            echo "pin_request=$pin_request"
+            echo "pin_version=$pin_version"
+            echo "pin_commit=$pin_commit"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Generate build matrix
         id: set-matrix
@@ -305,7 +324,9 @@ jobs:
           ANYKERNEL_REPO: ${{ vars.ANYKERNEL_REPO }}
           KERNEL_VERSION: ${{ matrix.kernel_version }}
           KERNEL_SOURCE: ${{ github.event.inputs.KERNEL_SOURCE }}
-          KERNEL_EXACT_VERSION: ${{ github.event.inputs.KERNEL_EXACT_VERSION }}
+          KERNEL_EXACT_VERSION: ${{ needs.prepare.outputs.pin_version }}
+          KERNEL_PIN_REQUEST: ${{ needs.prepare.outputs.pin_request }}
+          KERNEL_PIN_COMMIT: ${{ needs.prepare.outputs.pin_commit }}
           ALLOW_UNVERIFIED: ${{ github.event.inputs.ALLOW_UNVERIFIED }}
           HYPERCORE_DEVICE: ${{ vars.HYPERCORE_DEVICE }}
           ALLOW_SKIPPED_PATCHES: ${{ vars.ALLOW_SKIPPED_PATCHES }}
@@ -414,6 +435,12 @@ jobs:
           KERNEL_SOURCE_URL=${{ env.KERNEL_SOURCE_URL }}
           KERNEL_TAG=${{ env.KERNEL_TAG }}
           KERNEL_EXACT_REQUESTED=${{ env.KERNEL_EXACT_REQUESTED }}
+          KERNEL_SOURCE_ID=${{ env.KERNEL_SOURCE_ID }}
+          KERNEL_SOURCE_ROLE=${{ env.KERNEL_SOURCE_ROLE }}
+          KERNEL_SOURCE_KIND=${{ env.KERNEL_SOURCE_KIND }}
+          KERNEL_SOURCE_OVERRIDDEN=${{ env.KERNEL_SOURCE_OVERRIDDEN }}
+          KERNEL_UPSTREAM_REPO=${{ env.KERNEL_UPSTREAM_REPO }}
+          KERNEL_UPSTREAM_BRANCH=${{ env.KERNEL_UPSTREAM_BRANCH }}
           SUSFS_COMMIT_USED=${{ env.SUSFS_COMMIT_USED }}
           EOF
 

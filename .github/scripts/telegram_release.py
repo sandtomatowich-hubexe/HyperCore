@@ -114,17 +114,41 @@ def source_urls(repo, branch):
     return f"https://github.com/{repo}", f"https://github.com/{repo}/tree/{branch}"
 
 
+def commit_url(repo, sha):
+    if repo.startswith("http"):
+        return f"{repo.rstrip('/')}/+/{sha}"
+    return f"https://github.com/{repo}/commit/{sha}"
+
+
+def source_label(meta):
+    """Tell apart a source HyperCore manages from the original project it comes from."""
+    prov = meta.get("provenance") or {}
+    if meta.get("source_overridden"):
+        return "Source (custom)"
+    return {"managed": "Source (HyperCore-managed)", "external": "Source (upstream)"}.get(prov.get("role"), "Source")
+
+
 def build_blocks(meta, zip_path, attach):
     ft = meta.get("features") or {}
     repo, branch = meta.get("source_repo", ""), meta.get("source_branch", "")
+    prov = meta.get("provenance") or {}
     t1 = [
         [cell("Kernel"), cell(f"Linux {meta.get('linux', '')}")],
     ]
     if repo:
         repo_url, branch_url = source_urls(repo, branch)
-        t1.append([cell("Source"), cell(chip(repo.rstrip("/").split("/")[-1], repo_url))])
+        t1.append([cell(source_label(meta)), cell(chip(repo.rstrip("/").split("/")[-1], repo_url))])
         if branch:
             t1.append([cell("Branch"), cell(chip(branch, branch_url))])
+        if meta.get("commit"):
+            t1.append([cell("Commit"), cell(chip(meta["commit"][:12], commit_url(repo, meta["commit"])))])
+    if prov.get("role") == "managed" and prov.get("upstream_repo") and not meta.get("source_overridden"):
+        up_repo, up_branch = prov["upstream_repo"], prov.get("upstream_branch", "")
+        up_short = re.sub(r"^https://(www\.)?github\.com/", "", up_repo).rstrip("/")
+        up_url, up_branch_url = source_urls(up_short if "github.com" in up_repo else up_repo, up_branch)
+        t1.append([cell("Upstream"), cell(chip(up_short.split("/")[-1], up_url))])
+        if up_branch:
+            t1.append([cell("Upstream branch"), cell(chip(up_branch, up_branch_url))])
     t1.append([cell("Toolchain"), cell(toolchain(meta.get("compiler")))])
     t1.append([cell("LTO"), cell(chip(lto_label(meta.get("lto"))))])
 
@@ -168,10 +192,15 @@ def send_rich(meta, zip_path, silent):
 def fallback_caption(meta):
     ft = meta.get("features") or {}
     onoff_s = lambda v: "on" if v else "off"
+    prov = meta.get("provenance") or {}
     lines = [f"<b>{html.escape(meta.get('variant', ''))}</b>",
              f"Kernel: Linux {html.escape(meta.get('linux', ''))}",
              f"Toolchain: {html.escape(toolchain(meta.get('compiler')))}",
              f"LTO: {html.escape(lto_label(meta.get('lto')))}"]
+    if meta.get("source_repo"):
+        lines.append(f"{source_label(meta)}: {html.escape(meta['source_repo'])} @ {html.escape(meta.get('source_branch', ''))}")
+    if prov.get("role") == "managed" and prov.get("upstream_repo") and not meta.get("source_overridden"):
+        lines.append(f"Upstream: {html.escape(prov['upstream_repo'])} @ {html.escape(prov.get('upstream_branch', ''))}")
     label, url = root_label(meta)
     if label:
         lines.append(f'Root: <a href="{html.escape(url or "")}">{html.escape(label)}</a>' if url else f"Root: {html.escape(label)}")

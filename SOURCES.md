@@ -76,6 +76,8 @@ variable `HYPERCORE_DEVICE`). `build.sh` repeats the check, so it cannot be run 
 | `sources.<id>.default_for_line` | Exactly one source per line is the default |
 | `sources.<id>.branch_variants` | A different branch when a feature flag is on (for example `NH`) |
 | `sources.<id>.devices.<device>` | What is known about this source on this device |
+| `sources.<id>.kind`, `role`, `upstream`, `sync`, `credits` | Who controls the source and where it comes from (see below) |
+| `sources.<id>.versions` | Supported Linux versions and recorded builds (see below) |
 
 The `toolchain` entries are documentation for now. `build.sh` still downloads Neutron clang on its own.
 
@@ -97,17 +99,110 @@ The validator enforces the rules, so they cannot be skipped by accident:
 - A device runs one kernel line (`devices.<id>.kernel_line`). A source on another line can only be `unsupported` for it.
 - Unknown keys are errors, with a hint for typos.
 
-## Pinning an exact version or commit
+## Choosing the Linux version
 
-`KERNEL_EXACT_VERSION` takes a Linux version (`6.1.180`) or a commit SHA (7 to 40 hex characters).
+`KERNEL_EXACT_VERSION` takes one of:
 
-- A version is searched in the first-parent history of the source branch. The build uses the last commit that still
-  reports it. If it does not exist, the error names the nearest versions that do.
-- A commit must exist, be part of the history of the source branch, and have a Makefile that reports a version of the
-  selected line. Otherwise the error says which of these failed and shows the Linux version of the branch tip.
-- Both need a single kernel line, not `All`.
-- The first job resolves the pin with a commit-only clone, so a wrong pin fails once, early. After checkout the tree
-  has to report the pinned version.
+| Value | Meaning |
+|---|---|
+| empty | The branch tip of the source, as before |
+| `6.1.180` | The last commit of the source that reports Linux 6.1.180 |
+| a commit SHA (7 to 40 hex characters) | That commit, if it is on the source branch and reports a version of the selected line |
+| `latest-stable` | The newest release of the selected line that kernel.org lists as stable or longterm |
+| `latest-lts` | The same, but kernel.org must list the line as longterm |
+
+How it is resolved, in the first job (the build jobs only receive the result):
+
+1. **Format and line.** A version must belong to the selected line. All selectors need one line, not `All`.
+2. **Upstream.** `latest-*` reads kernel.org's official `releases.json` and picks the newest release of the selected line
+   only. If the list cannot be read, or the line is not listed, the run fails.
+3. **Source history.** The version is searched in the first-parent history of the source branch (a commit-only clone). The
+   build uses the last commit that still reports it. If the source does not have that version, the error names the
+   nearest versions it does have. kernel.org having a release does not mean the source has merged it.
+4. **Registry policy.** The `versions` block of the source can declare a supported range and recorded builds (below).
+5. **Hand-off.** The first job passes the resolved version and the full commit SHA to every build, so a push that lands while
+   the matrix runs cannot give two variants different sources. After checkout the tree has to report the same version.
+
+Nothing in this chain replaces a version by another one. The summary of every build records the requested selector, the
+resolved Linux version and the full commit SHA.
+
+## Supported versions of a source
+
+A source can carry a `versions` block. It is optional.
+
+```json
+"versions": {
+  "min": "6.1.115",
+  "max": "6.1.200",
+  "reason": "older trees lack the base the patches are written against",
+  "verified": {
+    "6.1.177": {"duchamp": {
+      "build_verification": {"state": "verified", "evidence": "run #12, log inspected, KSU variant"},
+      "boot_verification":  {"state": "unverified"}
+    }}
+  }
+}
+```
+
+- A version below `min` or above `max` is refused, with the `reason`.
+- A version inside the range builds. If it has a `verified` record, the build says what was recorded; if not, it says that
+  no build or boot result is recorded. That is information, not an error.
+- `verified` records use the same states and evidence rules as the device assessments, and they never change
+  `compatibility` by themselves. Only boot evidence on the device does that.
+- Versions in the block must belong to the source's line, and devices must exist.
+- A source replaced by a repository variable skips the range, with a warning.
+
+The registry ships without a `versions` block for the Duchamp source, because no range or build record has been verified yet.
+
+## Managed sources and upstream attribution
+
+HyperCore can build from a repository it controls (a fork) instead of presenting someone else's repository and branches as its
+own. The registry describes this with fields that already exist in the schema:
+
+```json
+"gkid-duchamp-6.1": {
+  "line": "6.1", "kind": "device",
+  "repo": "https://github.com/<owner>/<hypercore-fork>",
+  "branch": "hypercore/6.1",
+  "role": "managed",
+  "upstream": {"repo": "https://github.com/ahmed-alnassif/GKI-Duchamp-6.1", "branch": "GKID-6.1",
+               "synced_commit": "<40-character SHA of the last upstream commit merged>"},
+  "sync": {"strategy": "merge"},
+  "credits": [{"name": "Ahmed Al-Nassif", "url": "https://github.com/ahmed-alnassif/GKI-Duchamp-6.1", "license": "GPL-2.0-only"}]
+}
+```
+
+| Field | Rule |
+|---|---|
+| `kind` | `device` (made for one device) or `generic-gki` (a generic GKI source that is only valid where the device's requirements allow it) |
+| `role` | `external` (default: the repository belongs to another project) or `managed` (HyperCore controls it) |
+| `upstream` | Required for `managed`: the external repository and branch it tracks. It must differ from the source itself |
+| `sync.strategy` | Only `merge`. Rebasing or squashing would drop the original authorship and break version resolution, which relies on history |
+| `credits` | Required for `managed`: who wrote the original, with a link and the licence |
+
+What this gives you today: the validator refuses a managed source without its upstream, sync policy and credits; version
+selection, pins and the gate work on a managed source exactly as on an external one; and every build summary and Telegram
+message says whether the source is an external project or HyperCore-managed, and names the upstream project, so an upstream
+branch is never shown as a HyperCore one.
+
+**The reporting rule.** Every report that names the kernel source also says who controls it, and a managed source and the
+upstream project it tracks are always named separately. Nothing presents an upstream branch or its code as HyperCore's:
+
+| Report | What it says |
+|---|---|
+| Job summary | `Source role` and `Upstream project` rows, and a sentence that is different for external, managed and custom sources |
+| Telegram | `Source (upstream)`, `Source (HyperCore-managed)` or `Source (custom)`, plus `Upstream` and `Upstream branch` rows for a managed source |
+| Release page | A "Kernel source" block per kernel line with the same three labels, the upstream project, the commit and the requested version |
+| Release metadata | `source_id`, `provenance`, `commit`, `pin_request` |
+
+A source replaced by a repository variable is always called custom and never claimed as either. A build that did not record its
+origin says "origin not recorded". `tests/test_report_provenance.py` checks that the reports agree.
+
+The exact requirements for that move (decisions, fork layout, merge-only syncing, conflict handling, attribution) are written
+in [MANAGED_SOURCES.md](MANAGED_SOURCES.md). Nothing described there has been created.
+
+What it does not do yet: create the fork, name or protect its branches, or sync it from upstream. That is a separate stage and
+needs decisions about where the fork lives and who may write to it.
 
 ## duchamp compatibility
 
@@ -169,6 +264,8 @@ gate, pins, workflow) and the backward-compatibility test, which runs a frozen c
 - No real GitHub Actions run and no real duchamp build have been done with these changes. See the checklist in
   `CHANGELOG.md`.
 - The compatibility gate trusts the registry. It cannot find out by itself that a kernel does not boot.
+- `latest-*` depends on kernel.org being reachable from the runner. The selected source usually lags upstream, so the newest
+  kernel.org release is often not buildable yet. That is reported, never worked around.
 - Pinning relies on the source's first-parent history having non-decreasing versions, which holds for the Android Common
   Kernel branches and for merge-based device trees. A rebased or squashed history may not resolve every version.
 - The toolchain and other build settings are recorded per line, but only the defconfig name is read by the build.

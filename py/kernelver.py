@@ -4,9 +4,10 @@
 Usage:
     kernelver.py <KERNEL_VERSION> [<KERNEL_EXACT_VERSION>] [--gha]
 
-An empty pin is always fine (the branch default is used). Otherwise the pin is either a Linux version written
-MAJOR.MINOR.SUBLEVEL (for example 6.1.180), which must belong to the selected line, or a commit SHA of 7 to 40
-hex characters. Either needs one kernel line, not All. Whether the version or commit actually exists in the
+An empty pin is always fine (the branch default is used). Otherwise the pin is a Linux version written
+MAJOR.MINOR.SUBLEVEL (for example 6.1.180), which must belong to the selected line, a commit SHA of 7 to 40
+hex characters, or one of the selectors latest-stable and latest-lts (see py/kernel_versions.py). Each needs one
+kernel line, not All. Whether the version or commit actually exists in the
 selected source is checked later, against its history (py/resolve_kernel_commit.py).
 
 Exit status is 0 when the request is valid and 1 when it is not. With --gha the error is printed
@@ -25,6 +26,13 @@ def supported_lines():
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
     import sources
     return tuple(sources.load().lines)
+
+
+def keyword(pin: str) -> str:
+    """'latest-stable' or 'latest-lts' (spelling variants such as 'Latest LTS' are accepted), else an empty string."""
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+    import kernel_versions
+    return kernel_versions.normalize_keyword(pin)
 
 
 def is_commit(pin: str) -> bool:
@@ -55,12 +63,16 @@ def validate(base: str, exact: str) -> str:
     if is_commit(exact):
         return ""
 
+    if keyword(exact):
+        return ""
+
     match = EXACT_RE.match(exact)
     if not match:
         hint = " (drop the leading 'v')" if exact[:1] in ("v", "V") else ""
         return (
-            f"KERNEL_EXACT_VERSION '{exact}' is neither a Linux version nor a commit{hint}. "
-            "Write a version as MAJOR.MINOR.SUBLEVEL, for example 6.1.180, or a commit as 7 to 40 hex characters"
+            f"KERNEL_EXACT_VERSION '{exact}' is neither a Linux version nor a commit, nor latest-stable or latest-lts{hint}. "
+            "Write a version as MAJOR.MINOR.SUBLEVEL, for example 6.1.180, a commit as 7 to 40 hex characters, "
+            "or latest-stable / latest-lts"
         )
 
     line = f"{match.group(1)}.{match.group(2)}"

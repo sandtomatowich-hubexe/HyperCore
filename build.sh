@@ -45,6 +45,9 @@ fi
 # sources.json defines the kernel lines and their default sources; stop here, with one line per problem, if it is broken
 validate_source_registry
 
+# Patch steps create commits. A runner has no git identity, so give the build one before any of them runs.
+ensure_git_identity
+
 resolve_kernel_source_config
 enforce_source_gate
 
@@ -75,6 +78,7 @@ clone_kernel_source
 cd $KSRC
 LINUX_VERSION=$(make kernelversion)
 verify_exact_kernel_version
+enforce_version_policy
 record_kernel_source
 LINUX_VERSION_CODE=${LINUX_VERSION//./}
 DEFCONFIG_FILE=$(find ./arch/arm64/configs -name "$KERNEL_DEFCONFIG")
@@ -415,6 +419,9 @@ if susfs_included; then
   fi
 
 fi
+
+# Optional read-only probe of how the release string interacts with module loading (HYPERCORE_PROBE=true, see PROBE.md)
+run_compat_probe
 
 if [ "$TEST" = "yes" ]; then
   success "Pipeline test done"
