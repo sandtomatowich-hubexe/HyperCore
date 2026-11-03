@@ -25,7 +25,7 @@ def clean_env(global_config="/dev/null", **extra):
     """An environment where git has no identity and is not allowed to guess one."""
     env = {
         "PATH": os.environ["PATH"], "HOME": tempfile.gettempdir(),
-        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": global_config,
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": "/dev/null", "GIT_CONFIG_GLOBAL": global_config,
         "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "user.useConfigOnly", "GIT_CONFIG_VALUE_0": "true",
         "GIT_TERMINAL_PROMPT": "0",
     }

@@ -57,11 +57,14 @@ link_ksu_tree() {
 # environment, so no git config file is modified, and only when git has no usable identity of its own, so an identity
 # you configured yourself is kept. Safe to call more than once.
 ensure_git_identity() {
-    if command git var GIT_COMMITTER_IDENT >/dev/null 2>&1 && command git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
-        return 0
+    if ! command git var GIT_AUTHOR_IDENT >/dev/null 2>&1; then
+        export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gkid-ci}"
+        export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci@localhost}"
     fi
-    export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-gkid-ci}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-ci@localhost}"
-    export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gkid-ci}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci@localhost}"
+    if ! command git var GIT_COMMITTER_IDENT >/dev/null 2>&1; then
+        export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-gkid-ci}"
+        export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-ci@localhost}"
+    fi
 }
 
 # pershoot's two susfs4ksu fixes (they touch only kernel_patches/fs/susfs.c), cherry-picked onto the SUSFS checkout.
@@ -71,8 +74,8 @@ apply_pershoot_susfs_fixes() {
     local -a commits
     read -r -a commits <<< "${PERSHOOT_SUSFS_COMMITS:-6387756d64b3ab9ececefc4523627a9ee05a7519 161c058fed5544a6573d87124f346dadd5c4962d}"
 
-    ensure_git_identity
     ( cd "$SUSFS_DIR" \
+      && ensure_git_identity \
       && git fetch -q "$url" "${commits[@]}" \
       && for commit in "${commits[@]}"; do git cherry-pick "$commit" || exit 1; done ) \
       || { error "pershoot susfs4ksu fixes failed to apply"; exit 1; }
