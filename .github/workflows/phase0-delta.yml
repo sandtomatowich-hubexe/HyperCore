@@ -32,8 +32,6 @@ on:
         type: boolean
 
 jobs:
-  delta:
-    runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
       REPORT_DIR: ${{ runner.temp }}/phase0-report
@@ -53,10 +51,10 @@ jobs:
           NO_SAMPLES: ${{ github.event.inputs.NO_SAMPLES }}
         run: |
           set -euo pipefail
-          mkdir -p "$REPORT_DIR"
+          mkdir -p "$RUNNER_TEMP/phase0-report"
           args=(--workdir "$RUNNER_TEMP/delta-work" --hypercore "$GITHUB_WORKSPACE"
                 --luminaire-branch "$LUMINAIRE_BRANCH"
-                --out "$REPORT_DIR/delta-report.md" --json "$REPORT_DIR/delta-report.json")
+                --out "$RUNNER_TEMP/phase0-report/delta-report.md" --json "$RUNNER_TEMP/phase0-report/delta-report.json")
           if [ -n "$GKID_BRANCH" ]; then args+=(--gkid-branch "$GKID_BRANCH"); fi
           if [ "$AUDIT_ACK_HISTORY" = "true" ]; then args+=(--audit-ack-history); fi
           if [ "$SKIP_PATCHES" = "true" ]; then args+=(--skip-patches); fi
@@ -66,8 +64,8 @@ jobs:
       - name: Show the report in the job summary
         if: always()
         run: |
-          if [ -f "$REPORT_DIR/delta-report.md" ]; then
-            head -c 900000 "$REPORT_DIR/delta-report.md" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$RUNNER_TEMP/phase0-report/delta-report.md" ]; then
+            head -c 900000 "$RUNNER_TEMP/phase0-report/delta-report.md" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "The delta report was not produced. See the log of the previous step." >> "$GITHUB_STEP_SUMMARY"
           fi
