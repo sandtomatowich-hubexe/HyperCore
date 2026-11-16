@@ -68,7 +68,6 @@ class WorkflowSafety(unittest.TestCase):
         import yaml
         text = (ROOT / ".github" / "workflows" / "phase0-delta.yml").read_text()
         job = yaml.safe_load(text)["jobs"]["delta"]
-        self.assertTrue(job["env"]["REPORT_DIR"].startswith("${{ runner.temp }}/"))
         steps = {st["name"]: st for st in job["steps"]}
         runs = "\n".join(st.get("run", "") for st in job["steps"])
         paths = "\n".join(str(st.get("with", {}).get("path", "")) for st in job["steps"])
@@ -76,11 +75,11 @@ class WorkflowSafety(unittest.TestCase):
         for blob in (runs, paths):
             for m in re.finditer(r"delta-report\.(md|json)", blob):
                 before = blob[max(0, m.start() - 40):m.start()]
-                self.assertTrue(before.endswith(("$REPORT_DIR/", "${{ runner.temp }}/phase0-report/")),
+                self.assertTrue(before.endswith(("$RUNNER_TEMP/phase0-report/", "${{ runner.temp }}/phase0-report/")),
                                 f"report file outside the temp directory: ...{before}{m.group(0)}")
         run_step = steps["Run delta analysis"]["run"]
-        self.assertIn('--out "$REPORT_DIR/delta-report.md"', run_step)
-        self.assertIn('--json "$REPORT_DIR/delta-report.json"', run_step)
+        self.assertIn('--out "$RUNNER_TEMP/phase0-report/delta-report.md"', run_step)
+        self.assertIn('--json "$RUNNER_TEMP/phase0-report/delta-report.json"', run_step)
         self.assertIn('--workdir "$RUNNER_TEMP/', run_step)
         self.assertEqual(steps["Run delta analysis"]["env"]["PYTHONDONTWRITEBYTECODE"], "1")
         # the workspace is only ever passed as the (read-only) --hypercore argument
@@ -99,7 +98,7 @@ class WorkflowSafety(unittest.TestCase):
         job = yaml.safe_load((ROOT / ".github" / "workflows" / "phase0-delta.yml").read_text())["jobs"]["delta"]
         run = [st for st in job["steps"] if st.get("name") == "Run delta analysis"][0]["run"]
         workdir = re.search(r'--workdir "(\$RUNNER_TEMP/[^"]+)"', run).group(1)
-        report_dir = job["env"]["REPORT_DIR"].replace("${{ runner.temp }}", "$RUNNER_TEMP")
+        report_dir = "$RUNNER_TEMP/phase0-report"
         self.assertNotEqual(workdir, report_dir)
         self.assertFalse(report_dir.startswith(workdir + "/"), "reports must not live inside the scratch repository")
         self.assertFalse(workdir.startswith(report_dir + "/"))
