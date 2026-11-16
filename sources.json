@@ -101,6 +101,33 @@
         }
       ]
     },
+    "aosp-ack-6.1": {
+      "line": "6.1",
+      "repo": "https://android.googlesource.com/kernel/common",
+      "branch": "android14-6.1-lts",
+      "label": "Android Common Kernel (Phase 0 baseline)",
+      "default_for_line": false,
+      "kind": "generic-gki",
+      "devices": {
+        "duchamp": {
+          "compatibility": "needs-verification",
+          "build_verification": {
+            "state": "unverified"
+          },
+          "boot_verification": {
+            "state": "unverified"
+          },
+          "notes": "Plain Android Common Kernel on the same line and Android release as duchamp (6.1, android14). Added for the Phase 0 baseline test only. It is not the default during Phase 0: select it with KERNEL_SOURCE=aosp-ack-6.1 and ALLOW_UNVERIFIED=true. The current default stays unchanged only to avoid altering today's builds, which is a temporary measure and not a commitment to any other source. Nothing is known yet about whether this source boots without device-specific changes."
+        }
+      },
+      "credits": [
+        {
+          "name": "Android Open Source Project and Linux kernel contributors",
+          "url": "https://android.googlesource.com/kernel/common",
+          "license": "GPL-2.0-only"
+        }
+      ]
+    },
     "aosp-ack-5.10": {
       "line": "5.10",
       "repo": "https://android.googlesource.com/kernel/common",

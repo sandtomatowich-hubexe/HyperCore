@@ -1,0 +1,83 @@
+name: Phase 0 Delta Report
+# Read-only analysis (PHASE0.md). Manual trigger only. It never builds a kernel, never writes to this repository,
+# and does not touch the Kernel Builder workflow, the registry or any release.
+# Nothing is written into the checkout ($GITHUB_WORKSPACE): the scratch repository and both reports live under
+# $RUNNER_TEMP, and the artifact is uploaded from there.
+# ACK is the upstream. GKID and Luminaire are read-only references used only to find Duchamp-specific adaptations.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      GKID_BRANCH:
+        description: "GKID reference branch (empty = the branch the registry lists; read-only reference, never a source)"
+        default: ""
+        type: string
+      LUMINAIRE_BRANCH:
+        description: "Luminaire reference branch (the tree reported to boot on Duchamp)"
+        default: "android14-6.1"
+        type: string
+      AUDIT_ACK_HISTORY:
+        description: "Read the Linux version at every Makefile change on the ACK branch and check its order (slower)"
+        default: true
+        type: boolean
+      SKIP_PATCHES:
+        description: "Skip the review of HyperCore's own patches"
+        default: false
+        type: boolean
+      NO_SAMPLES:
+        description: "Leave sample source lines out of the report"
+        default: false
+        type: boolean
+
+jobs:
+  delta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      REPORT_DIR: ${{ runner.temp }}/phase0-report
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Run delta analysis
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          GKID_BRANCH: ${{ github.event.inputs.GKID_BRANCH }}
+          LUMINAIRE_BRANCH: ${{ github.event.inputs.LUMINAIRE_BRANCH }}
+          AUDIT_ACK_HISTORY: ${{ github.event.inputs.AUDIT_ACK_HISTORY }}
+          SKIP_PATCHES: ${{ github.event.inputs.SKIP_PATCHES }}
+          NO_SAMPLES: ${{ github.event.inputs.NO_SAMPLES }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$REPORT_DIR"
+          args=(--workdir "$RUNNER_TEMP/delta-work" --hypercore "$GITHUB_WORKSPACE"
+                --luminaire-branch "$LUMINAIRE_BRANCH"
+                --out "$REPORT_DIR/delta-report.md" --json "$REPORT_DIR/delta-report.json")
+          if [ -n "$GKID_BRANCH" ]; then args+=(--gkid-branch "$GKID_BRANCH"); fi
+          if [ "$AUDIT_ACK_HISTORY" = "true" ]; then args+=(--audit-ack-history); fi
+          if [ "$SKIP_PATCHES" = "true" ]; then args+=(--skip-patches); fi
+          if [ "$NO_SAMPLES" = "true" ]; then args+=(--no-samples); fi
+          python3 phase0/delta_report.py "${args[@]}"
+
+      - name: Show the report in the job summary
+        if: always()
+        run: |
+          if [ -f "$REPORT_DIR/delta-report.md" ]; then
+            head -c 900000 "$REPORT_DIR/delta-report.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "The delta report was not produced. See the log of the previous step." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the report (statistics only; no kernel source is stored)
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: phase0-delta-report
+          path: |
+            ${{ runner.temp }}/phase0-report/delta-report.md
+            ${{ runner.temp }}/phase0-report/delta-report.json
+          if-no-files-found: ignore

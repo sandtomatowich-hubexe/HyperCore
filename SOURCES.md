@@ -211,6 +211,7 @@ This is what the registry holds. Nothing here is marked compatible on the streng
 | Source | Line | Compatibility | Build | Boot |
 |---|---|---|---|---|
 | `gkid-duchamp-6.1` (`ahmed-alnassif/GKI-Duchamp-6.1`, `GKID-6.1`, `GKID-NH`) | 6.1 | needs-verification | reported: Kernel Builder run #8 was green on 2026-10-28 (owner's screenshot, logs not inspected) | unverified |
+| `aosp-ack-6.1` (Android Common Kernel, `android14-6.1-lts`) | 6.1 | needs-verification | unverified | unverified. Phase 0 baseline source: not the default during Phase 0, needs `ALLOW_UNVERIFIED`. The current GKID default is a temporary build-safety measure, not a commitment (see [PHASE0.md](PHASE0.md)) |
 | `aosp-ack-5.10`, `aosp-ack-5.15`, `aosp-ack-6.6`, `aosp-ack-6.12` | 5.10, 5.15, 6.6, 6.12 | unsupported (basis: reasoned) | unverified | unverified |
 
 Why the others are unsupported: they are generic Android Common Kernel branches, and duchamp (Poco X6 Pro, MT6897) is a

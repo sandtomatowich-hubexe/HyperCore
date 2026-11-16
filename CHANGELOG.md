@@ -1,5 +1,39 @@
 # Changelog
 
+## 2026-11-07
+
+### Added
+- **Phase 0 of the move to a HyperCore-owned, ACK-based kernel tree** (`PHASE0.md`). Evidence gathering only; nothing that builds
+  today changed. ACK is the upstream; GKID and Luminaire are read-only references.
+  - `sources.json`: new source `aosp-ack-6.1` (Android Common Kernel, `android14-6.1-lts`). It is not the default during Phase 0
+    and needs `KERNEL_SOURCE=aosp-ack-6.1` plus `ALLOW_UNVERIFIED=true`. Its Duchamp assessment is `needs-verification` with both
+    build and boot `unverified`.
+  - `phase0/delta_report.py` and the manual workflow `phase0-delta.yml`: a read-only report of what the GKID and Luminaire trees
+    change over Android Common Kernel, sorted into Duchamp hardware/boot adaptation candidates, general performance and
+    functionality patches, GKID-specific changes that are not demonstrably required, and a review of HyperCore's own patches
+    against ACK. It runs in an isolated bare scratch repository with a private temporary index, compares lines by SHA-256, finds
+    each tree's ACK base exactly (shared history) or approximately with a labelled confidence, audits the ACK version history
+    instead of assuming it is monotonic, and treats the reverse-apply check as a heuristic.
+  - `tests/test_phase0*.py` and `tests/phase0_helpers.py`: tests on generated repositories for base detection, version
+    histories, patch analysis, isolation, signals from both trees, determinism and Markdown/JSON agreement.
+  - The workflow writes both reports under `$RUNNER_TEMP` and the script refuses any `--out`, `--json` or `--workdir` inside the
+    checkout, and any `--out` or `--json` inside the `--workdir` scratch repository, before anything is fetched or written, so
+    a run leaves the checkout unchanged and cannot damage the scratch repository.
+  - `--out` and `--json` must be different files (checked before any work), reports are written by atomic replacement so a
+    hard-linked output target is never modified, and `--candidate-samples` below 2 is refused with a clear error instead of
+    crashing.
+  - The approximate ACK base states how many candidates were compared and that a sampled result is not guaranteed to be the best.
+  - `PHASE0.md` and the report compare the patch check with the build's real method (`apply_patch_file`: git apply, then
+    `patch --fuzz=3`, then a fuzzy reverse); `tests/test_phase0_buildmethod.py` runs the build's own functions against it.
+- `tests/test_gate.py` and `tests/test_sources.py` were updated for the extra listed source. `gkid-duchamp-6.1` is still the
+  asserted default of 6.1.
+
+### Not changed
+- The default source (kept only to avoid changing today's builds; a temporary measure, not a commitment to GKID), the Kernel
+  Builder workflow, `build.sh`, the configs, the patches, and every verification state.
+- A 6.1 build still skips `kernel-patches/common` and three related patch steps (written for GKID). `PHASE0.md` explains what that
+  means for a build on ACK.
+
 ## 2026-10-29
 
 ### Fixed

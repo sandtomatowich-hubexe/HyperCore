@@ -182,7 +182,9 @@ class GateCommandLine(unittest.TestCase):
         def out(*a):
             return subprocess.run([sys.executable, str(SCRIPT), *a], capture_output=True, text=True).stdout.strip()
         self.assertEqual(out("default-device"), "duchamp")
-        self.assertEqual(out("sources", "6.1"), "gkid-duchamp-6.1")
+        # gkid-duchamp-6.1 stays the default. aosp-ack-6.1 is the Phase 0 baseline source: listed, never the default.
+        self.assertEqual(out("sources", "6.1"), "gkid-duchamp-6.1 aosp-ack-6.1")
+        self.assertEqual(out("status", "aosp-ack-6.1"), "needs-verification for duchamp (build: unverified, boot: unverified)")
         self.assertEqual(out("status", "gkid-duchamp-6.1"), "needs-verification for duchamp (build: reported, boot: unverified)")
         self.assertEqual(out("status", "aosp-ack-6.6", "marble"), "not assessed for marble")
 

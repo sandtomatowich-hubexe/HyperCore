@@ -281,7 +281,7 @@ class CommandLine(unittest.TestCase):
     def test_validate_succeeds(self):
         result = self.run_cli("validate")
         self.assertEqual(result.returncode, 0)
-        self.assertIn("OK: 5 kernel lines, 5 sources", result.stdout)
+        self.assertIn("OK: 5 kernel lines, 6 sources", result.stdout)
 
     def test_select_prints_the_pipe_record(self):
         result = self.run_cli("select", "6.1", "--flag", "NH=true")
