@@ -32,9 +32,9 @@ on:
         type: boolean
 
 jobs:
+  delta:
+    runs-on: ubuntu-latest
     timeout-minutes: 150
-    env:
-      REPORT_DIR: ${{ runner.temp }}/phase0-report
     steps:
       - name: Checkout source
         uses: actions/checkout@v7.0.1
