@@ -2,6 +2,8 @@
 
 # HyperCore
 
+<img src="./HyperCore.svg" alt="HyperCore" width="92%">
+
 **GKI kernels for Android, built in the cloud with GitHub Actions.**
 
 KernelSU and its forks, SUSFS, Baseband Guard, BBRv3, NTSync, DroidSpaces, zram tuning and more.
