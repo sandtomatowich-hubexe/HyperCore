@@ -2,7 +2,7 @@
 
 # HyperCore
 
-<img src="./HyperCore.svg" alt="HyperCore" width="92%">
+<img src="https://raw.githubusercontent.com/sandtomatowich-hubexe/sandtomatowich-hub/main/HyperCore.svg" alt="HyperCore" width="92%">
 
 **GKI kernels for Android, built in the cloud with GitHub Actions.**
 
