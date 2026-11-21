@@ -13,6 +13,7 @@ Pick the options, run one workflow, get flashable zips, checksums, a GitHub Rele
 [![Release](https://img.shields.io/github/v/release/sandtomatowich-hubexe/HyperCore?include_prereleases&label=release&logo=github)](https://github.com/sandtomatowich-hubexe/HyperCore/releases)
 [![Stars](https://img.shields.io/github/stars/sandtomatowich-hubexe/HyperCore?logo=github)](https://github.com/sandtomatowich-hubexe/HyperCore/stargazers)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-Chat%20Topic-26A5E4?logo=telegram&logoColor=white)](https://t.me/MqDeadline)
 
 [Downloads](https://github.com/sandtomatowich-hubexe/HyperCore/releases) |
 [Build site](https://sandtomatowich-hubexe.github.io/HyperCore/) |
