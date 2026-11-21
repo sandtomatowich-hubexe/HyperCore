@@ -7,7 +7,7 @@
 **GKI kernels for Android, built in the cloud with GitHub Actions.**
 
 KernelSU and its forks, SUSFS, Baseband Guard, BBRv3, NTSync, DroidSpaces, zram tuning and more.
-Pick the options, run one workflow, get flashable zips, checksums, a GitHub Release, a Pages site and a Telegram post.
+Pick the options, run one workflow, get flashable zips, checksums, and GitHub Release.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/sandtomatowich-hubexe/HyperCore/build.yml?label=build&logo=githubactions&logoColor=white)](https://github.com/sandtomatowich-hubexe/HyperCore/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/sandtomatowich-hubexe/HyperCore?include_prereleases&label=release&logo=github)](https://github.com/sandtomatowich-hubexe/HyperCore/releases)
