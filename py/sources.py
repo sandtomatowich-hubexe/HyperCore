@@ -511,8 +511,8 @@ class Registry:
     def check_version(self, line: str, source_id: str = "", version: str = "", device: str = "",
                       custom: bool = False) -> Dict[str, Any]:
         """Check one Linux version against the range and the build records of the selected source."""
-        device = device or self.default_device
         src_id, src = self.pick_source(line, source_id)
+        device = device or (self.default_device if src.get("kind", "device") == "device" else "")
         errors: List[str] = []
         notes: List[tuple] = []
         if not VERSION_RE.match(version or ""):
@@ -530,12 +530,14 @@ class Registry:
         if versions.get("max") and _vkey(version) > _vkey(versions["max"]):
             errors.append(f"Linux {version} is above the highest version {src_id} supports, {versions['max']}{reason}")
         if not errors:
-            record = versions.get("verified", {}).get(version, {}).get(device)
+            record = versions.get("verified", {}).get(version, {}).get(device) if device else None
             if record:
                 boot = record.get("boot_verification", {}).get("state", "unverified")
                 notes.append(("notice", f"Linux {version} on {src_id}: build {record['build_verification']['state']}, boot {boot} recorded for {device}"))
-            else:
+            elif device:
                 notes.append(("notice", f"Linux {version} has no recorded build or boot result for {src_id} on {device}"))
+            else:
+                notes.append(("notice", f"Linux {version} has no device-specific build or boot result evaluated for {src_id}; no target device was selected"))
         return {"errors": errors, "notes": notes}
 
     def select(self, line: str, flags: Optional[Dict[str, str]] = None, source_id: str = "") -> Dict[str, str]:
@@ -578,12 +580,11 @@ def gate(registry: Registry, kernel_version: str, source_id: str = "", device: s
                           does not describe what will be built, so it is allowed with a warning
     With kernel_version "All", blocked lines are skipped with a warning as long as one line remains.
     """
-    device = device or registry.default_device
     custom = set(custom_lines or [])
     errors: List[str] = []
     notes: List[tuple] = []  # (level, text)
 
-    if device not in registry.data["devices"]:
+    if device and device not in registry.data["devices"]:
         raise RegistryError([f"Unknown device '{device}'. Configured devices: {', '.join(registry.data['devices'])}"])
 
     is_all = kernel_version.lower() == "all"
@@ -600,25 +601,29 @@ def gate(registry: Registry, kernel_version: str, source_id: str = "", device: s
     for line in (registry.lines if is_all else [kernel_version]):
         src_id, src = registry.pick_source(line, source_id)
         explicit = source_id not in ("", "default") and src_id != registry.default_source(line)[0]
-        status = registry.device_status(src_id, device)
-        a = registry.assessment(src_id, device)
+        target_device = device or (registry.default_device if src.get("kind", "device") == "device" else "")
+        status = registry.device_status(src_id, target_device) if target_device else "not-assessed"
+        a = registry.assessment(src_id, target_device) if target_device else None
         label = f"{line} ({src_id})"
 
         if line in custom:
             notes.append(("warning", f"{label}: a repository variable replaces the registry's repository or branch, so the "
                                      f"{status} assessment of {src_id} does not describe what will be built"))
             allowed.append(line)
+        elif not target_device:
+            notes.append(("warning", f"{label}: no target device selected; device compatibility and boot status are not evaluated"))
+            allowed.append(line)
         elif status == "confirmed":
             allowed.append(line)
         elif status == "unsupported":
             reason = a.get("reason", "")
-            msg = f"{label} is unsupported for {device}: {reason}"
+            msg = f"{label} is unsupported for {target_device}: {reason}"
             if is_all:
                 notes.append(("warning", f"Skipping {msg}"))
             else:
                 errors.append(msg + " Edit sources.json only with evidence (see SOURCES.md)")
         elif explicit and not allow_unverified:
-            errors.append(f"{label}: {registry.describe_status(src_id, device)}. "
+            errors.append(f"{label}: {registry.describe_status(src_id, target_device)}. "
                           "Selecting a source that is not verified needs ALLOW_UNVERIFIED=true")
         elif status == "not-assessed":
             notes.append(("warning", f"{label}: {registry.describe_status(src_id, device)}. Nothing is known about it for this device"))
