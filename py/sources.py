@@ -601,7 +601,7 @@ def gate(registry: Registry, kernel_version: str, source_id: str = "", device: s
     for line in (registry.lines if is_all else [kernel_version]):
         src_id, src = registry.pick_source(line, source_id)
         explicit = source_id not in ("", "default") and src_id != registry.default_source(line)[0]
-        target_device = device or (registry.default_device if src.get("kind", "device") == "device" else "")
+        target_device = device or (registry.default_device if is_all or not explicit or src.get("kind", "device") == "device" else "")
         status = registry.device_status(src_id, target_device) if target_device else "not-assessed"
         a = registry.assessment(src_id, target_device) if target_device else None
         label = f"{line} ({src_id})"
@@ -626,15 +626,15 @@ def gate(registry: Registry, kernel_version: str, source_id: str = "", device: s
             errors.append(f"{label}: {registry.describe_status(src_id, target_device)}. "
                           "Selecting a source that is not verified needs ALLOW_UNVERIFIED=true")
         elif status == "not-assessed":
-            notes.append(("warning", f"{label}: {registry.describe_status(src_id, device)}. Nothing is known about it for this device"))
+            notes.append(("warning", f"{label}: {registry.describe_status(src_id, target_device)}. Nothing is known about it for this device"))
             allowed.append(line)
         else:
-            notes.append(("warning", f"{label}: {registry.describe_status(src_id, device)}. "
+            notes.append(("warning", f"{label}: {registry.describe_status(src_id, target_device)}. "
                                      "It will build, but it is not boot-verified on the device"))
             allowed.append(line)
 
     if is_all and not allowed and not errors:
-        errors.append(f"No kernel line is buildable for {device}")
+        errors.append(f"No kernel line is buildable for {device or registry.default_device}")
     return {"device": device, "lines": allowed, "errors": errors, "notes": notes}
 
 

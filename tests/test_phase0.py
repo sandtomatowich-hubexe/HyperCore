@@ -26,11 +26,11 @@ class RegistryEntry(unittest.TestCase):
         self.assertEqual(cli("select", "6.1").stdout.split("|")[3], "gkid-duchamp-6.1")
 
     def test_ack_6_1_is_gated(self):
-        blocked = cli("gate", "--kernel-version", "6.1", "--source", "aosp-ack-6.1", "--allow-unverified", "false",
+        blocked = cli("gate", "--kernel-version", "6.1", "--source", "aosp-ack-6.1", "--device", "duchamp", "--allow-unverified", "false",
                       "--custom-lines", "")
         self.assertNotEqual(blocked.returncode, 0)
         self.assertIn("ALLOW_UNVERIFIED", blocked.stdout + blocked.stderr)
-        allowed = cli("gate", "--kernel-version", "6.1", "--source", "aosp-ack-6.1", "--allow-unverified", "true",
+        allowed = cli("gate", "--kernel-version", "6.1", "--source", "aosp-ack-6.1", "--device", "duchamp", "--allow-unverified", "true",
                       "--custom-lines", "")
         self.assertEqual(allowed.returncode, 0)
 
