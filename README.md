@@ -20,8 +20,6 @@ Pick the options, run one workflow, get flashable zips, checksums, and GitHub Re
 
 [![Telegram](https://img.shields.io/badge/Telegram-Chat%20Topic-26A5E4?logo=telegram&logoColor=white)](https://t.me/MqDeadline)
 
-[![Website](https://img.shields.io/website?url=https%3A%2F%2Fsandtomatowich-hubexe.github.io%2FHyperCore&label=website&logo=githubpages)](https://sandtomatowich-hubexe.github.io/HyperCore/)
-
 </p>
 
 </div>
